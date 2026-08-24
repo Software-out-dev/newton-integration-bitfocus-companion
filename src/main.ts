@@ -50,7 +50,7 @@ import {
 import { VuListener } from './protocol/vu-listener.js'
 import type { GainReadState, NewtonActionResult, NewtonState, SPRResponse, SnapshotInfo } from './protocol/types.js'
 
-// Must match the vu_in_N / vu_out_N variable counts defined in variables.ts.
+// Must match the vu_input_N / vu_output_N variable counts defined in variables.ts.
 const VU_INPUT_CHANNEL_COUNT = 16
 const VU_OUTPUT_CHANNEL_COUNT = 16
 
@@ -1180,20 +1180,13 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 			last_applied_snapshot: this.state.lastAppliedSnapshot || '',
 		}
 
-		// The legacy 1-based IDs (as published by 1.0.0) and the preferred
-		// *_input_N aliases carry the same values, so existing Companion
-		// configurations keep their meaning.
 		for (let i = 0; i < SIGNALS_INPUT_DSP_PRIORITY_COUNT; i++) {
 			const v = this.state.priorityInputDsp[i]
-			const value = prioritySourceForOperator(v)
-			vars[`priority_in_${i + 1}`] = value
-			vars[`priority_input_${i + 1}`] = value
+			vars[`priority_input_${i + 1}`] = prioritySourceForOperator(v)
 		}
 		for (let i = 0; i < SIGNALS_AUX_MIXER_PRIORITY_COUNT; i++) {
 			const v = this.state.priorityAuxMixer[i]
-			const value = prioritySourceForOperator(v)
-			vars[`priority_aux_${i + 1}`] = value
-			vars[`priority_aux_input_${i + 1}`] = value
+			vars[`priority_aux_input_${i + 1}`] = prioritySourceForOperator(v)
 		}
 
 		const monitorIndex = SETTINGS.priorityMonitorChannelIndex
@@ -1244,28 +1237,21 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 
 	private buildVuVariables(): Record<string, string | number> {
 		const vars: Record<string, string | number> = {}
-		// Publish the legacy 1-based IDs (as in 1.0.0) and the preferred aliases.
 		if (this.state.vuInputDsp.length === 0 && this.state.vuOutputDsp.length === 0) {
 			// Unknown/undecoded packet format: publish N/A rather than leaving the
 			// last-known per-channel values frozen on screen.
 			for (let i = 0; i < VU_INPUT_CHANNEL_COUNT; i++) {
-				vars[`vu_in_${i + 1}`] = 'N/A'
 				vars[`vu_input_${i + 1}`] = 'N/A'
 			}
 			for (let i = 0; i < VU_OUTPUT_CHANNEL_COUNT; i++) {
-				vars[`vu_out_${i + 1}`] = 'N/A'
 				vars[`vu_output_${i + 1}`] = 'N/A'
 			}
 		} else {
 			for (let i = 0; i < VU_INPUT_CHANNEL_COUNT; i++) {
-				const value = this.state.vuInputDsp[i]?.toFixed(2) ?? 'N/A'
-				vars[`vu_in_${i + 1}`] = value
-				vars[`vu_input_${i + 1}`] = value
+				vars[`vu_input_${i + 1}`] = this.state.vuInputDsp[i]?.toFixed(2) ?? 'N/A'
 			}
 			for (let i = 0; i < VU_OUTPUT_CHANNEL_COUNT; i++) {
-				const value = this.state.vuOutputDsp[i]?.toFixed(2) ?? 'N/A'
-				vars[`vu_out_${i + 1}`] = value
-				vars[`vu_output_${i + 1}`] = value
+				vars[`vu_output_${i + 1}`] = this.state.vuOutputDsp[i]?.toFixed(2) ?? 'N/A'
 			}
 		}
 		this.updateSelectedVuState()

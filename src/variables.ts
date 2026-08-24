@@ -47,15 +47,8 @@ export function getVariableDefinitions(): CompanionVariableDefinition[] {
 		{ variableId: 'vu_format', name: 'VU Format Status' },
 	]
 
-	// The legacy priority_in_N / priority_aux_N / vu_in_N / vu_out_N IDs are
-	// 1-based exactly as release 1.0.0 published them, so existing Companion
-	// configurations keep their meaning. The *_input_N / *_output_N aliases
-	// are the preferred operator-facing names for new configs.
+	// Per-channel variables use 1-based operator-facing numbering.
 	for (let i = 0; i < SIGNALS_INPUT_DSP_PRIORITY_COUNT; i++) {
-		defs.push({
-			variableId: `priority_in_${i + 1}`,
-			name: `Priority Patch Input DSP ${i + 1} - Active Source (legacy name)`,
-		})
 		defs.push({
 			variableId: `priority_input_${i + 1}`,
 			name: `Priority Patch Input DSP ${i + 1} - Active Source`,
@@ -63,22 +56,14 @@ export function getVariableDefinitions(): CompanionVariableDefinition[] {
 	}
 	for (let i = 0; i < SIGNALS_AUX_MIXER_PRIORITY_COUNT; i++) {
 		defs.push({
-			variableId: `priority_aux_${i + 1}`,
-			name: `Priority Patch Aux Mixer ${i + 1} - Active Source (legacy name)`,
-		})
-		defs.push({
 			variableId: `priority_aux_input_${i + 1}`,
 			name: `Priority Patch Aux Mixer ${i + 1} - Active Source`,
 		})
 	}
-
-	// Same compatibility pattern for per-channel VU levels.
 	for (let i = 0; i < VU_INPUT_CHANNELS; i++) {
-		defs.push({ variableId: `vu_in_${i + 1}`, name: `VU Input DSP ${i + 1} (legacy name)` })
 		defs.push({ variableId: `vu_input_${i + 1}`, name: `VU Input DSP ${i + 1}` })
 	}
 	for (let i = 0; i < VU_OUTPUT_CHANNELS; i++) {
-		defs.push({ variableId: `vu_out_${i + 1}`, name: `VU Output DSP ${i + 1} (legacy name)` })
 		defs.push({ variableId: `vu_output_${i + 1}`, name: `VU Output DSP ${i + 1}` })
 	}
 

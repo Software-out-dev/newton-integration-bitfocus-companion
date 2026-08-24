@@ -1510,30 +1510,41 @@ test('failed gain and mute writes keep the freshly-read device state', async () 
 	assert.deepEqual(reads, [current, current])
 })
 
-test('legacy mute feedback and protocol-indexed variable IDs remain available', () => {
+test('deprecated feedbacks stay inert and per-channel variables expose only canonical IDs', () => {
 	const defs = getFeedbackDefinitions(() => ({}))
 	assert.equal(defs.mute_active.callback({ options: {} }), false)
 	assert.equal(defs.preset_active.callback({ options: { preset: 42 } }), false)
 
 	const ids = new Set(getVariableDefinitions().map((definition) => definition.variableId))
 	assert.equal(ids.has('current_preset'), false)
-	// Legacy IDs are 1-based exactly as 1.0.0 published them.
+	// Canonical per-channel IDs are 1-based.
 	for (const id of [
-		'priority_in_1',
-		'priority_in_16',
 		'priority_input_1',
 		'priority_input_16',
-		'priority_aux_1',
+		'priority_aux_input_1',
 		'priority_aux_input_8',
-		'vu_in_1',
+		'vu_input_1',
 		'vu_input_16',
-		'vu_out_1',
+		'vu_output_1',
 		'vu_output_16',
 	]) {
 		assert.equal(ids.has(id), true, id)
 	}
-	assert.equal(ids.has('priority_in_0'), false)
-	assert.equal(ids.has('vu_in_0'), false)
+	// No 0-based IDs and none of the removed legacy alias families.
+	for (const id of [
+		'priority_input_0',
+		'vu_input_0',
+		'priority_in_1',
+		'priority_in_16',
+		'priority_aux_1',
+		'priority_aux_8',
+		'vu_in_1',
+		'vu_in_16',
+		'vu_out_1',
+		'vu_out_16',
+	]) {
+		assert.equal(ids.has(id), false, id)
+	}
 })
 
 test('a command timeout marks the connection as lost (pulled-cable detection)', async () => {
