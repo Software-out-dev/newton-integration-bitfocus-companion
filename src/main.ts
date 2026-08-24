@@ -1,11 +1,6 @@
 import { InstanceBase, InstanceStatus, runEntrypoint } from '@companion-module/base'
-import {
-	SETTINGS,
-	getConfigFields,
-	getInteractivityProfile,
-	normalizeInteractivity,
-	type ModuleConfig,
-} from './config.js'
+import { getConfigFields, getInteractivityProfile, normalizeInteractivity, type ModuleConfig } from './config.js'
+import { SETTINGS } from './settings.js'
 import { UpgradeScripts } from './upgrades.js'
 import { getActionDefinitions } from './actions.js'
 import { bindActionClient } from './action-client.js'

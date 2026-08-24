@@ -1,4 +1,4 @@
-import { SETTINGS } from './config.js'
+import { SETTINGS } from './settings.js'
 import { PRESET_AUDIO_RESPONSE_LENGTH, parsePresetAudioGains } from './protocol/command-parser.js'
 
 const PRESET_AUDIO_BACKOFF_THRESHOLD = 2
