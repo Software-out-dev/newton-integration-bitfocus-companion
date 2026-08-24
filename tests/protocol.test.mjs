@@ -1510,10 +1510,12 @@ test('failed gain and mute writes keep the freshly-read device state', async () 
 	assert.deepEqual(reads, [current, current])
 })
 
-test('deprecated feedbacks stay inert and per-channel variables expose only canonical IDs', () => {
-	const defs = getFeedbackDefinitions(() => ({}))
-	assert.equal(defs.mute_active.callback({ options: {} }), false)
-	assert.equal(defs.preset_active.callback({ options: { preset: 42 } }), false)
+test('first release ships no tombstone definitions and only canonical variable IDs', () => {
+	const feedbackIds = new Set(Object.keys(getFeedbackDefinitions(() => ({}))))
+	assert.equal(feedbackIds.has('mute_active'), false)
+	assert.equal(feedbackIds.has('preset_active'), false)
+	const actionIds = new Set(Object.keys(getActionDefinitions(null, { log: () => {} })))
+	assert.equal(actionIds.has('legacy_unsafe_action'), false)
 
 	const ids = new Set(getVariableDefinitions().map((definition) => definition.variableId))
 	assert.equal(ids.has('current_preset'), false)

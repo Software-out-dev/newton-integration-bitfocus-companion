@@ -369,27 +369,6 @@ export function getActionDefinitions(
 		})
 	}
 	return {
-		legacy_unsafe_action: {
-			name: 'Blocked legacy Newton action',
-			description: 'This saved action is no longer supported and was disabled during an update.',
-			options: [
-				{
-					type: 'textinput',
-					label: 'Reason',
-					id: 'reason',
-					default: '',
-				},
-			],
-			callback: async (action) => {
-				reportActionFailure(
-					logger,
-					'Blocked legacy Newton action',
-					String(action.options['reason'] ?? 'review and recreate it'),
-					action.controlId,
-				)
-			},
-		},
-
 		// ===== Gain =====
 		set_gain: {
 			name: 'Set Gain and Mute State',

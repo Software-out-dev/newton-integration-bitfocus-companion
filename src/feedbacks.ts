@@ -15,8 +15,7 @@ import type { NewtonState, SnapshotInfo } from './protocol/types.js'
  * One outcome resolution for both status feedbacks so they can never
  * disagree. Scope 'this' (the default): only the button's own action result
  * counts — pressing elsewhere leaves this lamp untouched. Scope 'global':
- * the module-wide last action, which is what configurations saved before
- * the scope option existed rely on (an upgrade script marks them 'global').
+ * the module-wide last action result.
  */
 function resolveLastActionOutcome(
 	feedback: { controlId?: string; options: { [key: string]: unknown } },
@@ -282,41 +281,6 @@ export function getFeedbackDefinitions(
 	}
 
 	return {
-		mute_active: {
-			type: 'boolean',
-			name: 'Mute Active (deprecated)',
-			description:
-				'Deprecated compatibility feedback. Newton no longer exposes one global mute state; use Levels - Channel Mute for a channel-specific state.',
-			defaultStyle: {
-				bgcolor: combineRgb(255, 0, 0),
-				color: combineRgb(255, 255, 255),
-			},
-			options: [],
-			callback: () => false,
-		},
-		preset_active: {
-			type: 'boolean',
-			name: 'Preset Active (deprecated)',
-			description:
-				'Deprecated compatibility feedback. Newton is a signal matrix/hub and has no active device preset; this feedback always remains false.',
-			defaultStyle: {
-				bgcolor: combineRgb(0, 128, 0),
-				color: combineRgb(255, 255, 255),
-			},
-			// Keep the historical option so saved 0.2.0 feedbacks remain editable,
-			// while intentionally not restoring the removed current_preset state.
-			options: [
-				{
-					type: 'number',
-					label: 'Former Preset Number (ignored)',
-					id: 'preset',
-					default: 0,
-					min: 0,
-					max: 255,
-				},
-			],
-			callback: () => false,
-		},
 		connection_status: {
 			type: 'boolean',
 			name: 'Device Connected',
