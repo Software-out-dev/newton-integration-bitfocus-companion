@@ -969,157 +969,8 @@ test('structured snapshot diagnostics are bounded before they reach Companion va
 	assert.equal(formatStructuredDiagnostic(cyclic), 'Unserializable response payload')
 })
 
-test('upgrade retains legacy mute ids and migrates generated priority presets safely', () => {
-	const result = UpgradeScripts[0](
-		{ currentConfig: {} },
-		{
-			config: { priorityMonitorChannelType: 6, vuMonitorChannelType: 6 },
-			actions: [
-				{ id: 'a', controlId: 'c', actionId: 'set_mute', options: {} },
-				{ id: 'b', controlId: 'c', actionId: 'rearm_priority', options: { channelType: 0, channelIndex: 3 } },
-			],
-			feedbacks: [
-				{
-					id: 'f',
-					controlId: 'c',
-					feedbackId: 'priority_overridden',
-					options: { channelType: 0, patchIndex: 3, highestSource: 3 },
-					isInverted: false,
-				},
-			],
-		},
-	)
-	assert.equal(result.updatedConfig, null)
-	assert.equal(result.updatedActions[0].actionId, 'legacy_unsafe_action')
-	assert.deepEqual(result.updatedActions[1].options, { channelIndex: 3, rearmIndex: 0 })
-	assert.equal(result.updatedFeedbacks[0].options.highestSource, 11)
-})
-
-test('upgrade blocks every removed 0.2 action instead of leaving an orphaned action id', () => {
-	const removed = [
-		'change_preset',
-		'store_preset',
-		'set_polarity',
-		'set_matrix',
-		'snapshot_apply',
-		'snapshot_store',
-		'snapshot_delete',
-		'rearm_all_input_priority',
-		'rearm_all_aux_priority',
-	]
-	const result = UpgradeScripts[0](
-		{ currentConfig: {} },
-		{
-			config: null,
-			actions: removed.map((actionId, index) => ({ id: String(index), controlId: 'c', actionId, options: {} })),
-			feedbacks: [],
-		},
-	)
-	assert.equal(result.updatedActions.length, removed.length)
-	assert.ok(result.updatedActions.every((action) => action.actionId === 'legacy_unsafe_action'))
-	assert.ok(
-		result.updatedActions.every(
-			(action) => typeof action.options.reason === 'string' && action.options.reason.length > 0,
-		),
-	)
-})
-
-test('upgrade preserves the restored snapshot database action id', () => {
-	const result = UpgradeScripts[0](
-		{ currentConfig: {} },
-		{
-			config: null,
-			actions: [{ id: 'snapshot-refresh', controlId: 'c', actionId: 'snapshot_get_database', options: {} }],
-			feedbacks: [],
-		},
-	)
-	assert.equal(result.updatedActions[0].actionId, 'snapshot_get_database')
-})
-
-test('upgrade strips stored legacy config fields down to the device IP', () => {
-	const stripConfig = UpgradeScripts[1]
-	const result = stripConfig(
-		{ currentConfig: {} },
-		{
-			config: { host: '192.168.2.30', port: 9999, commandTimeoutMs: 0, priorityPollInterval: 0, vuPort: 0 },
-			actions: [],
-			feedbacks: [],
-		},
-	)
-	assert.deepEqual(result.updatedConfig, { host: '192.168.2.30', interactivity: 'medium' })
-
-	const noConfig = stripConfig({ currentConfig: {} }, { config: null, actions: [], feedbacks: [] })
-	assert.equal(noConfig.updatedConfig, null)
-})
-
-test('upgrade shifts priority input numbering from 0-based to 1-based', () => {
-	const renumber = UpgradeScripts[2]
-	const result = renumber(
-		{ currentConfig: {} },
-		{
-			config: null,
-			actions: [
-				{ id: 'a', controlId: 'c', actionId: 'rearm_priority', options: { channelIndex: 3, rearmIndex: 0 } },
-				{ id: 'b', controlId: 'c', actionId: 'read_priority_list', options: { channelIndex: 0 } },
-				{ id: 'c', controlId: 'c', actionId: 'change_preset', options: { preset: 2 } },
-			],
-			feedbacks: [
-				{
-					id: 'f',
-					controlId: 'c',
-					feedbackId: 'priority_overridden',
-					options: { channelType: 0, patchIndex: 3, highestSource: 11 },
-					isInverted: false,
-				},
-				{
-					id: 'g',
-					controlId: 'c',
-					feedbackId: 'connection_status',
-					options: {},
-					isInverted: false,
-				},
-			],
-		},
-	)
-	assert.deepEqual(
-		result.updatedActions.map((a) => a.options),
-		[{ channelIndex: 4, rearmIndex: 0 }, { channelIndex: 1 }],
-	)
-	assert.deepEqual(
-		result.updatedFeedbacks.map((f) => f.options),
-		[{ channelType: 0, patchIndex: 4, highestSource: 11 }],
-	)
-})
-
-test('upgrade drops manual expected-source options from priority feedbacks', () => {
-	const strip = UpgradeScripts[3]
-	const result = strip(
-		{ currentConfig: {} },
-		{
-			config: null,
-			actions: [],
-			feedbacks: [
-				{
-					id: 'f',
-					controlId: 'c',
-					feedbackId: 'priority_overridden',
-					options: { channelType: 0, patchIndex: 4, highestSource: 11 },
-					isInverted: false,
-				},
-				{
-					id: 'g',
-					controlId: 'c',
-					feedbackId: 'priority_active_source',
-					options: { channelType: 2, patchIndex: 3, expectedSource: 2 },
-					isInverted: false,
-				},
-			],
-		},
-	)
-	assert.deepEqual(
-		result.updatedFeedbacks.map((f) => f.options),
-		[{ patchIndex: 4 }, { patchIndex: 0 }],
-	)
+test('first release ships no upgrade scripts', () => {
+	assert.deepEqual(UpgradeScripts, [])
 })
 
 test('input patch monitor feedback writes the label and colors from device state', () => {
@@ -1148,48 +999,6 @@ test('input patch monitor feedback writes the label and colors from device state
 	assert.deepEqual(monitor.callback({ options: { patchIndex: 4 } }), { text: 'IN 4' })
 	// No channel list yet for input 5: label only, neutral colors.
 	assert.deepEqual(monitor.callback({ options: { patchIndex: 5 } }), { text: 'IN 5' })
-})
-
-test('upgrade converts styled boolean priority feedbacks to the advanced monitor', () => {
-	const convert = UpgradeScripts[4]
-	const result = convert(
-		{ currentConfig: {} },
-		{
-			config: null,
-			actions: [],
-			feedbacks: [
-				{ id: 'f', controlId: 'c', feedbackId: 'priority_overridden', options: { patchIndex: 4 }, isInverted: false },
-				{ id: 'g', controlId: 'c', feedbackId: 'priority_backup_active', options: {}, isInverted: false },
-				{ id: 'h', controlId: 'c', feedbackId: 'connection_status', options: {}, isInverted: false },
-			],
-		},
-	)
-	assert.deepEqual(
-		result.updatedFeedbacks.map((f) => ({ feedbackId: f.feedbackId, options: f.options })),
-		[
-			{ feedbackId: 'input_patch_monitor', options: { patchIndex: 4 } },
-			{ feedbackId: 'input_patch_monitor', options: { patchIndex: 1 } },
-		],
-	)
-})
-
-test('upgrade strips the removed rearm slot option from stored actions', () => {
-	const strip = UpgradeScripts[5]
-	const result = strip(
-		{ currentConfig: {} },
-		{
-			config: null,
-			actions: [
-				{ id: 'a', controlId: 'c', actionId: 'rearm_priority', options: { channelIndex: 3, rearmIndex: 2 } },
-				{ id: 'b', controlId: 'c', actionId: 'rearm_priority', options: { channelIndex: 5 } },
-			],
-			feedbacks: [],
-		},
-	)
-	assert.deepEqual(
-		result.updatedActions.map((a) => a.options),
-		[{ channelIndex: 3 }],
-	)
 })
 
 test('rearm-this-input action targets the input registered by the label feedback', async () => {
@@ -2281,27 +2090,7 @@ test('priority source variables expose 1-based values and hide the no-source sen
 	assert.equal(prioritySourceForOperator(undefined), 'N/A')
 })
 
-test('Set Gain migration preserves the target while changing the saved option to 1-based', () => {
-	const props = {
-		config: null,
-		actions: [
-			{ id: 'g0', controlId: 'c0', actionId: 'set_gain', options: { channelType: 0, channelIndex: 0 } },
-			{ id: 'g287', controlId: 'c1', actionId: 'set_gain', options: { channelType: 3, channelIndex: 287 } },
-			{ id: 'other', controlId: 'c2', actionId: 'adjust_gain', options: { channel: 1 } },
-		],
-		feedbacks: [],
-	}
-	const upgraded = UpgradeScripts.map((script) => script({ currentConfig: {} }, props)).find((result) =>
-		result.updatedActions.some((action) => action.id === 'g0' && action.options.channelIndex === 1),
-	)
-	assert.ok(upgraded, 'expected a Set Gain one-based migration script')
-	assert.deepEqual(
-		upgraded.updatedActions.map((action) => action.options.channelIndex),
-		[1, 288],
-	)
-})
-
-test('scope option restores module-wide status lamps and the upgrade marks pre-scope feedbacks global', () => {
+test('scope option restores module-wide status lamps', () => {
 	const state = {
 		lastActionName: 'Set Gain',
 		lastActionStatus: 'success',
@@ -2310,7 +2099,7 @@ test('scope option restores module-wide status lamps and the upgrade marks pre-s
 	const definitions = getFeedbackDefinitions(() => state)
 
 	// A dedicated lamp button (never ran an action itself) with scope 'global'
-	// lights from an action run anywhere, like 1.0.0 did.
+	// lights from an action run anywhere.
 	assert.equal(
 		definitions.last_action_success.callback({
 			controlId: 'lamp-button',
@@ -2323,29 +2112,6 @@ test('scope option restores module-wide status lamps and the upgrade marks pre-s
 		definitions.last_action_success.callback({ controlId: 'lamp-button', options: { actionName: 'Set Gain' } }),
 		false,
 	)
-
-	// Feedbacks saved before the option existed are migrated to 'global'.
-	const props = {
-		config: null,
-		actions: [],
-		feedbacks: [
-			{ id: 'f1', controlId: 'c1', feedbackId: 'last_action_error', options: { actionName: '' } },
-			{
-				id: 'f2',
-				controlId: 'c2',
-				feedbackId: 'last_action_success',
-				options: { actionName: 'Set Gain', scope: 'this' },
-			},
-			{ id: 'f3', controlId: 'c3', feedbackId: 'input_patch_monitor', options: {} },
-		],
-	}
-	const upgraded = UpgradeScripts.map((script) => script({ currentConfig: {} }, props)).find((result) =>
-		result.updatedFeedbacks.some((feedback) => feedback.id === 'f1' && feedback.options.scope === 'global'),
-	)
-	assert.ok(upgraded, 'expected a last-action scope migration script')
-	assert.equal(upgraded.updatedFeedbacks.length, 1)
-	assert.equal(upgraded.updatedFeedbacks[0].id, 'f1')
-	assert.equal(upgraded.updatedFeedbacks[0].options.scope, 'global')
 })
 
 test('snapshot label shows a loading state and keeps its target until the database is read', () => {
