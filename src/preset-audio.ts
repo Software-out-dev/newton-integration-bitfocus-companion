@@ -21,9 +21,9 @@ export interface PresetAudioPollSuccess {
  * Single-flight and retry gate for the large 0x21 transfer.
  *
  * Attempt tokens make lifecycle resets safe: a completion from an old TCP
- * session cannot release a newer transfer. Changing only the interactivity
- * profile deliberately leaves this gate intact, so restarting the cadence
- * never queues a second 384 KiB read behind one already in flight.
+ * session cannot release a newer transfer. Changing only the gain/mute
+ * refresh interval deliberately leaves this gate intact, so restarting the
+ * cadence never queues a second 384 KiB read behind one already in flight.
  */
 export class PresetAudioPollRecovery {
 	private activeAttempt: number | null = null

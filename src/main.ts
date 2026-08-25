@@ -1,5 +1,5 @@
 import { InstanceBase, InstanceStatus, runEntrypoint } from '@companion-module/base'
-import { getConfigFields, getInteractivityProfile, normalizeInteractivity, type ModuleConfig } from './config.js'
+import { DEFAULT_CONFIG, diffConfig, getConfigFields, normalizeConfig, type ModuleConfig } from './config.js'
 import { SETTINGS } from './settings.js'
 import { UpgradeScripts } from './upgrades.js'
 import { getActionDefinitions } from './actions.js'
@@ -107,7 +107,7 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 	private snapshotDbRetryTimer: ReturnType<typeof setTimeout> | null = null
 	private vuPublishTimer: ReturnType<typeof setTimeout> | null = null
 	private lastVuPublish = 0
-	private config: ModuleConfig = { host: '', interactivity: 'medium' }
+	private config: ModuleConfig = { ...DEFAULT_CONFIG }
 	private destroyed = false
 	// A reconnect can be the same IP hosting a replacement Newton. Keep the
 	// previous labels visible while retrying, but re-read them before trusting
@@ -151,7 +151,7 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 
 	async init(config: ModuleConfig): Promise<void> {
 		this.destroyed = false
-		this.config = { host: config.host ?? '', interactivity: normalizeInteractivity(config.interactivity) }
+		this.config = normalizeConfig(config)
 		this.updateStatus(InstanceStatus.Disconnected)
 
 		if (this.config.host) {
@@ -177,17 +177,15 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 	}
 
 	async configUpdated(config: ModuleConfig): Promise<void> {
-		const nextHost = config.host ?? ''
-		const nextInteractivity = normalizeInteractivity(config.interactivity)
-		const targetChanged = this.config.host !== nextHost
-		const interactivityChanged = this.config.interactivity !== nextInteractivity
+		const next = normalizeConfig(config)
+		const { targetChanged, meterChanged, gainMuteChanged } = diffConfig(this.config, next)
 
 		// Saving an unchanged configuration must not abort a command currently in
-		// flight. A profile-only update changes just the two cadence-dependent
-		// paths: UDP status and the large 0x21 preset-audio poll.
-		if (!targetChanged && !interactivityChanged) return
+		// flight, and each polling interval restarts only the subsystem it
+		// governs; neither interval touches the TCP session.
+		if (!targetChanged && !meterChanged && !gainMuteChanged) return
 
-		this.config = { host: nextHost, interactivity: nextInteractivity }
+		this.config = next
 
 		if (targetChanged) {
 			this.stopPolling()
@@ -206,15 +204,17 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 			// the replacement client exists, so old callbacks cannot resolve it.
 			this.setupDefinitions()
 		} else {
-			this.lastVuPublish = 0
-			if (this.config.host) {
+			if (meterChanged && this.config.host) {
 				// VuListener fixes its interval at construction time, so recreate it
-				// for the selected profile without touching TCP. The preset-audio
-				// scheduler is restarted below without resetting its single-flight
-				// gate, so an in-flight 0x21 transfer remains the sole active read.
+				// for the new cadence without touching TCP.
+				this.lastVuPublish = 0
 				this.startVuListener()
-				if (!this.client) this.connectToDevice()
-				else if (this.client.isConnected) this.startPresetAudioPolling()
+			}
+			if (gainMuteChanged && this.client?.isConnected) {
+				// Restart the 0x21 scheduler without resetting its single-flight
+				// gate, so an in-flight transfer remains the sole active read. While
+				// disconnected the 'connected' handler arms it with the new interval.
+				this.startPresetAudioPolling()
 			}
 		}
 
@@ -832,7 +832,7 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 	// Newton firmware 0.98 rejects the otherwise documented Get Gain request.
 	// The full preset-audio response is therefore the compatibility source for
 	// channel gain/mute state. It is requested only while a level feedback is
-	// subscribed, and its cadence follows the selected interactivity profile.
+	// subscribed, and its cadence follows the Gain/Mute refresh interval field.
 	private presetAudioPollTimer: ReturnType<typeof setInterval> | null = null
 	private readonly presetAudioRecovery = new PresetAudioPollRecovery()
 
@@ -840,7 +840,7 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 		this.clearPresetAudioPollTimer()
 		this.presetAudioPollTimer = setInterval(() => {
 			void this.pollPresetAudio()
-		}, getInteractivityProfile(this.config.interactivity).presetAudioPollInterval)
+		}, this.config.gain_mute_poll_interval)
 	}
 
 	private clearPresetAudioPollTimer(): void {
@@ -906,8 +906,7 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 	}
 
 	private registerPresetAudioFailure(attempt: number, reason: string): void {
-		const pollInterval = getInteractivityProfile(this.config.interactivity).presetAudioPollInterval
-		const failure = this.presetAudioRecovery.fail(attempt, pollInterval)
+		const failure = this.presetAudioRecovery.fail(attempt, this.config.gain_mute_poll_interval)
 		if (failure.enteredBackoff) {
 			// Stale values must not remain available to a later read-modify-write
 			// action while the device read is degraded. The timer stays armed and
@@ -1028,11 +1027,7 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 		this.stopVuListener()
 		if (this.destroyed || !this.config.host) return
 		this.udpStreamLost = false
-		const listener = new VuListener(
-			this.config.host,
-			SETTINGS.vuPort,
-			getInteractivityProfile(this.config.interactivity).meterPollInterval,
-		)
+		const listener = new VuListener(this.config.host, SETTINGS.vuPort, this.config.meter_poll_interval)
 		this.vuListener = listener
 		let loggedFirstPacket = false
 
@@ -1262,10 +1257,10 @@ class NewtonInstance extends InstanceBase<ModuleConfig> {
 
 	// VU data can arrive at 20-50 Hz; publish immediately if we haven't
 	// published recently, otherwise coalesce into a single trailing publish at
-	// the cadence of the selected interactivity profile.
+	// the configured meter polling interval.
 	private updateVuVariables(): void {
 		if (this.destroyed) return
-		const interval = getInteractivityProfile(this.config.interactivity).meterPollInterval
+		const interval = this.config.meter_poll_interval
 		const now = Date.now()
 		const elapsed = now - this.lastVuPublish
 		if (elapsed >= interval) {

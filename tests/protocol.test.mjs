@@ -43,7 +43,7 @@ import { getFeedbackDefinitions } from '../dist/feedbacks.js'
 import { getActionDefinitions } from '../dist/actions.js'
 import { parseSnapshotDatabase } from '../dist/snapshots.js'
 import { getVariableDefinitions, prioritySourceForOperator } from '../dist/variables.js'
-import { getConfigFields, getInteractivityProfile, normalizeInteractivity } from '../dist/config.js'
+import { DEFAULT_CONFIG, diffConfig, getConfigFields, normalizeConfig } from '../dist/config.js'
 import { SETTINGS } from '../dist/settings.js'
 import { bindActionClient } from '../dist/action-client.js'
 import { formatStructuredDiagnostic } from '../dist/diagnostics.js'
@@ -317,33 +317,80 @@ test('uses the documented ChannelType mapping', () => {
 	)
 })
 
-test('offers named interactivity profiles and normalizes old configurations to Default', () => {
-	assert.deepEqual(getInteractivityProfile('low'), {
-		meterPollInterval: 1000,
-		presetAudioPollInterval: 5000,
-	})
-	assert.deepEqual(getInteractivityProfile('medium'), {
-		meterPollInterval: 200,
-		presetAudioPollInterval: 2000,
-	})
-	assert.deepEqual(getInteractivityProfile('high'), {
-		meterPollInterval: 80,
-		presetAudioPollInterval: 1000,
-	})
+test('config exposes explicit polling interval fields with safe defaults', () => {
+	const fields = getConfigFields()
+	assert.equal(
+		fields.find((entry) => entry.id === 'interactivity'),
+		undefined,
+	)
+
+	const meter = fields.find((entry) => entry.id === 'meter_poll_interval')
+	assert.equal(meter.type, 'number')
+	assert.equal(meter.default, 100)
+	assert.equal(meter.min, 80)
+	assert.equal(meter.max, 1000)
+
+	const gainMute = fields.find((entry) => entry.id === 'gain_mute_poll_interval')
+	assert.equal(gainMute.type, 'number')
+	assert.equal(gainMute.default, 1500)
+	assert.equal(gainMute.min, 1000)
+	assert.equal(gainMute.max, 5000)
+
 	assert.equal(SETTINGS.priorityMetadataPollInterval, 1000)
 	assert.equal(SETTINGS.presetAudioTimeoutMs, 12000)
 	assert.equal(SETTINGS.actionQueueTtlMs, 16000)
-	assert.equal(normalizeInteractivity('unexpected'), 'medium')
+})
 
-	const field = getConfigFields().find((entry) => entry.id === 'interactivity')
+test('config normalization rounds, clamps and falls back to safe polling intervals', () => {
+	assert.deepEqual(normalizeConfig(undefined), DEFAULT_CONFIG)
+	assert.deepEqual(normalizeConfig(null), DEFAULT_CONFIG)
+	assert.deepEqual(normalizeConfig({}), { host: '', meter_poll_interval: 100, gain_mute_poll_interval: 1500 })
+
+	// Hand-edited or imported configs: non-numeric and non-finite values fall
+	// back to the defaults instead of reaching a setInterval call.
 	assert.deepEqual(
-		field.choices.map((choice) => ({ id: choice.id, label: choice.label })),
-		[
-			{ id: 'low', label: 'Low' },
-			{ id: 'medium', label: 'Default' },
-			{ id: 'high', label: 'High' },
-		],
+		normalizeConfig({ host: '10.0.0.5', meter_poll_interval: Number.NaN, gain_mute_poll_interval: 'fast' }),
+		{ host: '10.0.0.5', meter_poll_interval: 100, gain_mute_poll_interval: 1500 },
 	)
+	assert.equal(normalizeConfig({ gain_mute_poll_interval: Infinity }).gain_mute_poll_interval, 1500)
+	// A config saved by the removed interactivity dropdown normalizes safely.
+	assert.deepEqual(normalizeConfig({ host: '10.0.0.5', interactivity: 'high' }), {
+		host: '10.0.0.5',
+		meter_poll_interval: 100,
+		gain_mute_poll_interval: 1500,
+	})
+
+	// Out-of-range values clamp to the declared bounds; fractions and numeric
+	// strings become whole milliseconds.
+	const clamped = normalizeConfig({ host: 'newton.local', meter_poll_interval: 5, gain_mute_poll_interval: 99999 })
+	assert.equal(clamped.meter_poll_interval, 80)
+	assert.equal(clamped.gain_mute_poll_interval, 5000)
+	assert.equal(normalizeConfig({ meter_poll_interval: 123.4 }).meter_poll_interval, 123)
+	assert.equal(normalizeConfig({ meter_poll_interval: '250' }).meter_poll_interval, 250)
+})
+
+test('config diff keeps host, meter and gain/mute restarts independent', () => {
+	const current = normalizeConfig({ host: '10.0.0.5' })
+	assert.deepEqual(diffConfig(current, normalizeConfig({ host: '10.0.0.5' })), {
+		targetChanged: false,
+		meterChanged: false,
+		gainMuteChanged: false,
+	})
+	assert.deepEqual(diffConfig(current, normalizeConfig({ host: '10.0.0.5', meter_poll_interval: 250 })), {
+		targetChanged: false,
+		meterChanged: true,
+		gainMuteChanged: false,
+	})
+	assert.deepEqual(diffConfig(current, normalizeConfig({ host: '10.0.0.5', gain_mute_poll_interval: 3000 })), {
+		targetChanged: false,
+		meterChanged: false,
+		gainMuteChanged: true,
+	})
+	assert.deepEqual(diffConfig(current, normalizeConfig({ host: '10.0.0.9' })), {
+		targetChanged: true,
+		meterChanged: false,
+		gainMuteChanged: false,
+	})
 })
 
 test('builds Delay as 11 bytes with sample count and bypass', () => {
@@ -568,10 +615,7 @@ test('VU poller uses UDP 6667 with an ephemeral local port and does not use TCP 
 	assert.match(source, /const EXPIRY_MS = 3000/)
 	assert.doesNotMatch(mainSource, /buildImportSignalsCommand/)
 	assert.match(mainSource, /buildImportAudioPresetCommand/)
-	assert.match(mainSource, /const interactivityChanged = this\.config\.interactivity !== nextInteractivity/)
-	assert.match(mainSource, /if \(!targetChanged && !interactivityChanged\) return/)
 	assert.match(mainSource, /if \(targetChanged\) \{[\s\S]*?this\.startVuListener\(\)/)
-	assert.match(mainSource, /else if \(this\.client\.isConnected\) this\.startPresetAudioPolling\(\)/)
 })
 
 test('does not let an unexpected SPR command resolve the active SPC request', async () => {

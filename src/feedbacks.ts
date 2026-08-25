@@ -603,7 +603,7 @@ export function getFeedbackDefinitions(
 			type: 'advanced',
 			name: 'Levels - Channel Gain',
 			description:
-				'Shows a channel\'s live gain on the button, e.g. "GAIN IN 3 / -6.0 dB". Refreshes from the complete 0x21 audio-preset payload while the feedback is in use; its cadence follows Interactivity.',
+				'Shows a channel\'s live gain on the button, e.g. "GAIN IN 3 / -6.0 dB". Refreshes from the complete 0x21 audio-preset payload while the feedback is in use; its cadence follows the Gain/Mute refresh interval setting.',
 			options: [
 				{
 					type: 'dropdown',
@@ -642,7 +642,7 @@ export function getFeedbackDefinitions(
 			type: 'advanced',
 			name: 'Levels - Channel Mute',
 			description:
-				"Shows a channel's mute state (red muted, green open) and tells the Mute This Button Channel action which channel to toggle. Refreshes from the complete 0x21 audio-preset payload while the feedback is in use; its cadence follows Interactivity.",
+				"Shows a channel's mute state (red muted, green open) and tells the Mute This Button Channel action which channel to toggle. Refreshes from the complete 0x21 audio-preset payload while the feedback is in use; its cadence follows the Gain/Mute refresh interval setting.",
 			options: [
 				{
 					type: 'dropdown',
