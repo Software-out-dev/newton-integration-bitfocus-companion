@@ -46,9 +46,6 @@ export interface ClockPriorityState {
 }
 
 export interface VuState {
-	selected: string
-	selectedPeak: string
-	selectedClip: string
 	rawLength: number
 	rawFirstHex: string
 	format: string

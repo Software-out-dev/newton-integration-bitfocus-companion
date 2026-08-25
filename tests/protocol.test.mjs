@@ -605,17 +605,19 @@ test('VU listener accepts meter packets only from the configured Newton address 
 })
 
 test('VU poller uses UDP 6667 with an ephemeral local port and does not use TCP status polling', async () => {
-	const [source, mainSource] = await Promise.all([
+	const [source, sessionSource, instanceSource] = await Promise.all([
 		readFile(new URL('../src/protocol/vu-listener.ts', import.meta.url), 'utf8'),
-		readFile(new URL('../src/main.ts', import.meta.url), 'utf8'),
+		readFile(new URL('../src/newton-session.ts', import.meta.url), 'utf8'),
+		readFile(new URL('../src/instance.ts', import.meta.url), 'utf8'),
 	])
 	assert.match(source, /new UDPHelper\(this\.host, this\.port\)/)
 	assert.doesNotMatch(source, /new UDPHelper\(this\.host, this\.port,\s*\{/)
 	assert.match(source, /socket\.send\(buildImportSignalsCommand\(\)\)/)
 	assert.match(source, /const EXPIRY_MS = 3000/)
-	assert.doesNotMatch(mainSource, /buildImportSignalsCommand/)
-	assert.match(mainSource, /buildImportAudioPresetCommand/)
-	assert.match(mainSource, /if \(targetChanged\) \{[\s\S]*?this\.startVuListener\(\)/)
+	assert.doesNotMatch(sessionSource, /buildImportSignalsCommand/)
+	assert.doesNotMatch(instanceSource, /buildImportSignalsCommand/)
+	assert.match(sessionSource, /buildImportAudioPresetCommand/)
+	assert.match(instanceSource, /if \(targetChanged\) \{[\s\S]*?this\.session\.startVuListener\(\)/)
 })
 
 test('does not let an unexpected SPR command resolve the active SPC request', async () => {
