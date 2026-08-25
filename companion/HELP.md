@@ -5,7 +5,10 @@ Control the Outline Newton audio signal matrix and hub from Bitfocus Companion.
 ## Configuration
 
 - **Device IP Address**: the Newton's IP address.
-- **Interactivity**: choose Low, Default or High to balance interface responsiveness and network activity. Applying a new profile recreates the UDP meter socket immediately. The control intentionally shows only profile names.
+- **Meter/status polling interval (ms)**: how often Companion queries the VU meters and the live priority-patch/clock status over UDP `6667`. Default `100` ms = 10 queries per second; allowed range `80..1000` ms. Lower values give smoother meters and faster status monitors at the cost of more network traffic. Applying a new value recreates the UDP meter socket immediately; the TCP session is not touched.
+- **Gain/Mute refresh interval (ms)**: how often the gain/mute state is re-read from the full audio-preset payload (`0x21`, ~384 KiB per response) over TCP. Default `1500` ms = one read every 1.5 s (~256 KiB/s of payload while active); allowed range `1000..5000` ms. Periodic refresh runs only while at least one gain/mute feedback is in use, so buttons without Levels & Mute feedbacks cause no background `0x21` polling.
+
+Out-of-range or invalid interval values are clamped back to these ranges at runtime; saving a config that changes only the intervals never restarts the TCP session.
 
 Companion sends commands, configuration reads and snapshot traffic to Newton over TCP port `6668`. Real-time meter/status requests use UDP port `6667`; the operating system automatically chooses Companion's local UDP reply port.
 
@@ -51,7 +54,7 @@ Set the channel type (Input DSP or Output DSP) and the channel number `1..16` in
 
 Every gain the module writes is hard-clamped to the device-safe `-80..+6 dB` window: values outside this range never reach the device.
 
-Gain and mute feedbacks refresh from the complete Newton audio-preset payload (`0x21`) while at least one Levels & Mute feedback is in use. The selected interactivity profile controls this background cadence, so changes made elsewhere (another controller, the front panel, a snapshot recall) appear automatically. Before a relative gain or mute write, Companion reads the current device state and serializes same-channel presses, so it does not reuse stale gain/mute values. Values show `--` until first read or while disconnected.
+Gain and mute feedbacks refresh from the complete Newton audio-preset payload (`0x21`) while at least one Levels & Mute feedback is in use. The **Gain/Mute refresh interval** setting controls this background cadence, so changes made elsewhere (another controller, the front panel, a snapshot recall) appear automatically. Before a relative gain or mute write, Companion reads the current device state and serializes same-channel presses, so it does not reuse stale gain/mute values. Values show `--` until first read or while disconnected.
 
 ## Snapshots
 

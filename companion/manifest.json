@@ -4,7 +4,7 @@
 	"name": "Outline Newton",
 	"shortname": "Newton",
 	"description": "Control the Outline Newton audio signal matrix and hub via TCP 6668 with real-time meter polling over UDP 6667",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"license": "MIT",
 	"repository": "git+https://github.com/bitfocus/companion-module-outline-newton.git",
 	"bugs": "https://github.com/bitfocus/companion-module-outline-newton/issues",

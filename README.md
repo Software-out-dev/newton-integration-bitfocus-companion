@@ -15,7 +15,12 @@ See [companion/HELP.md](companion/HELP.md) (shown as the connection help inside 
 
 ## Configuration
 
-Set the Newton's **IP address**, then choose the Low, Default or High interactivity profile. Changing the profile immediately recreates the UDP meter socket with the selected cadence. Companion opens TCP control traffic to Newton on port 6668. Meter/status queries go to Newton over UDP port 6667, and the operating system chooses Companion's local UDP reply port. TCP is never used for meter data.
+Set the Newton's **IP address**, then tune the two polling intervals if needed:
+
+- **Meter/status polling interval**: default 100 ms = 10 UDP queries per second (range 80–1000 ms) for VU meters and the live priority/clock status.
+- **Gain/Mute refresh interval**: default 1500 ms per full `0x21` audio-preset read (~384 KiB per response, range 1000–5000 ms), polled only while gain/mute feedbacks are in use.
+
+Changing an interval restarts only the subsystem it governs and never the TCP session. Companion opens TCP control traffic to Newton on port 6668. Meter/status queries go to Newton over UDP port 6667, and the operating system chooses Companion's local UDP reply port. TCP is never used for meter data.
 
 ## Requirements
 
