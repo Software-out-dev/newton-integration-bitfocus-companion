@@ -218,8 +218,8 @@ export function getFeedbackDefinitions(
 	// controlId -> input number written by the rearm label feedback; the
 	// 'rearm_this_input' action reads it so one option drives the whole button.
 	rearmTargets: Map<string, number> = new Map(),
-	// feedback-instance id -> channel shown by Levels & Mute. main.ts uses the
-	// subscription set to avoid preset-audio traffic while no level is visible.
+	// feedback-instance id -> channel shown by Levels & Mute. The instance uses
+	// the subscription set to avoid preset-audio traffic while no level is visible.
 	gainSubs: Map<string, { channelType: number; channelIndex: number }> = new Map(),
 	// controlId -> clock type written by the clock rearm label feedback; the
 	// 'rearm_this_clock' action reads it so one option drives the whole button.
@@ -318,7 +318,8 @@ export function getFeedbackDefinitions(
 					type: 'textinput',
 					label: 'Action name (blank = any action)',
 					id: 'actionName',
-					default: 'Set Gain',
+					tooltip: 'Matches the action name shown in the actions list, e.g. "Set Gain and Mute State".',
+					default: 'Set Gain and Mute State',
 				},
 				LAST_ACTION_SCOPE_OPTION,
 			],
@@ -344,7 +345,8 @@ export function getFeedbackDefinitions(
 					type: 'textinput',
 					label: 'Action name (blank = any action)',
 					id: 'actionName',
-					default: 'Set Gain',
+					tooltip: 'Matches the action name shown in the actions list, e.g. "Set Gain and Mute State".',
+					default: 'Set Gain and Mute State',
 				},
 				LAST_ACTION_SCOPE_OPTION,
 			],

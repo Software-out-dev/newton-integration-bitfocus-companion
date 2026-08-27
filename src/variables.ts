@@ -1,7 +1,5 @@
 import type { CompanionVariableDefinition } from '@companion-module/base'
-import { SETTINGS } from './settings.js'
 import {
-	ChannelType,
 	PRIORITY_SOURCE_NONE,
 	SIGNALS_AUX_MIXER_PRIORITY_COUNT,
 	SIGNALS_INPUT_DSP_PRIORITY_COUNT,
@@ -36,18 +34,7 @@ export function getVariableDefinitions(): CompanionVariableDefinition[] {
 		{ variableId: 'snapshot_support', name: 'Snapshot Support' },
 		{ variableId: 'last_snapshot_response', name: 'Last Snapshot Response' },
 		{ variableId: 'last_applied_snapshot', name: 'Last Applied Snapshot' },
-		{ variableId: 'priority_selected_active', name: 'Selected Priority Patch - Active Source' },
-		{ variableId: 'priority_selected_highest', name: 'Selected Priority Patch - Highest Source' },
-		{ variableId: 'priority_selected_forced', name: 'Selected Priority Patch - Forced Mode' },
-		{ variableId: 'priority_selected_forced_channel', name: 'Selected Priority Patch - Forced Channel' },
-		{ variableId: 'priority_selected_overridden', name: 'Selected Priority Patch - Overridden' },
-		{ variableId: 'priority_read_list_status', name: 'Priority Read List Status' },
-		{ variableId: 'vu_selected', name: 'Selected VU Level' },
-		{ variableId: 'vu_selected_peak', name: 'Selected VU Peak' },
-		{ variableId: 'vu_selected_clip', name: 'Selected VU Clip' },
-		{ variableId: 'vu_raw_length', name: 'VU Raw Packet Length' },
-		{ variableId: 'vu_raw_first_hex', name: 'VU Raw First Bytes' },
-		{ variableId: 'vu_format', name: 'VU Format Status' },
+		{ variableId: 'vu_format', name: 'VU Stream Status' },
 	]
 
 	// Per-channel variables use 1-based operator-facing numbering.
@@ -71,24 +58,6 @@ export function getVariableDefinitions(): CompanionVariableDefinition[] {
 	}
 
 	return defs
-}
-
-export interface SelectedVu {
-	selected: string
-	selectedPeak: string
-	selectedClip: string
-}
-
-/** Derive the monitored channel's VU values; pure, never mutates the state. */
-export function computeSelectedVu(state: NewtonState): SelectedVu {
-	const arr = SETTINGS.vuMonitorChannelType === ChannelType.OutputDsp ? state.vuOutputDsp : state.vuInputDsp
-	const value = arr[SETTINGS.vuMonitorChannelIndex]
-	if (value === undefined) {
-		return { selected: 'N/A', selectedPeak: 'N/A', selectedClip: 'N/A' }
-	}
-	// The documented 0x2B meter data has no clip flag. Do not invent one
-	// from dB values: 0 dB is a valid peak, not a clipping indicator.
-	return { selected: value.toFixed(2), selectedPeak: value.toFixed(2), selectedClip: 'N/A' }
 }
 
 /** Every non-per-channel-VU variable value, derived from the device state. */
@@ -118,54 +87,18 @@ export function buildDeviceVariables(state: NewtonState): Record<string, string 
 		vars[`priority_aux_input_${i + 1}`] = prioritySourceForOperator(state.priorityAuxMixer[i])
 	}
 
-	const monitorIndex = SETTINGS.priorityMonitorChannelIndex
-	const selectedPriority = state.priorityInputDsp[monitorIndex] ?? -1
-	const selectedList = state.priorityLists[monitorIndex] ?? null
-	const selectedHighest = selectedList?.sources[0]
-	vars.priority_selected_active = prioritySourceForOperator(selectedPriority)
-	// A fixed fallback would turn an unavailable 0x91 list into a seemingly
-	// healthy "no" override. Only report a highest source when the device has
-	// actually supplied one for this patch.
-	vars.priority_selected_highest = prioritySourceForOperator(selectedHighest)
-	vars.priority_selected_forced = selectedList
-		? selectedList.isForced
-			? 'yes'
-			: 'no'
-		: state.priorityListsUnsupported
-			? 'unsupported'
-			: 'unknown'
-	vars.priority_selected_forced_channel = selectedList?.isForced
-		? prioritySourceForOperator(selectedList.forcedChannel)
-		: 'N/A'
-	vars.priority_selected_overridden =
-		prioritySourceForOperator(selectedPriority) === 'N/A' || prioritySourceForOperator(selectedHighest) === 'N/A'
-			? 'unknown'
-			: selectedPriority !== selectedHighest
-				? 'yes'
-				: 'no'
-	vars.priority_read_list_status = state.priorityListsUnsupported
-		? 'Unsupported by firmware'
-		: selectedList
-			? 'OK'
-			: 'Unknown'
 	vars.snapshot_support = state.snapshotsUnsupported
 		? 'Unsupported by firmware'
 		: state.snapshotDatabaseLoaded
 			? 'OK'
 			: 'Unknown'
 
-	const selectedVu = computeSelectedVu(state)
-	vars.vu_selected = selectedVu.selected
-	vars.vu_selected_peak = selectedVu.selectedPeak
-	vars.vu_selected_clip = selectedVu.selectedClip
-	vars.vu_raw_length = state.vu.rawLength
-	vars.vu_raw_first_hex = state.vu.rawFirstHex
 	vars.vu_format = state.vu.format
 
 	return vars
 }
 
-/** Per-channel VU variable values plus the selected-channel diagnostics. */
+/** Per-channel VU variable values plus the VU stream status. */
 export function buildVuVariables(state: NewtonState): Record<string, string | number> {
 	const vars: Record<string, string | number> = {}
 	if (state.vuInputDsp.length === 0 && state.vuOutputDsp.length === 0) {
@@ -185,12 +118,6 @@ export function buildVuVariables(state: NewtonState): Record<string, string | nu
 			vars[`vu_output_${i + 1}`] = state.vuOutputDsp[i]?.toFixed(2) ?? 'N/A'
 		}
 	}
-	const selectedVu = computeSelectedVu(state)
-	vars.vu_selected = selectedVu.selected
-	vars.vu_selected_peak = selectedVu.selectedPeak
-	vars.vu_selected_clip = selectedVu.selectedClip
-	vars.vu_raw_length = state.vu.rawLength
-	vars.vu_raw_first_hex = state.vu.rawFirstHex
 	vars.vu_format = state.vu.format
 	vars.last_vu_update = state.lastVuUpdate || 'Never'
 	return vars

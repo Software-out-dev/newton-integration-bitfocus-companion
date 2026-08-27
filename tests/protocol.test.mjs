@@ -7,8 +7,6 @@ import test from 'node:test'
 
 import { ChannelType, SNAPSHOT_MAX_PAYLOAD_BYTES, SnapshotCmd } from '../dist/protocol/constants.js'
 import {
-	buildDelayCommand,
-	buildFaderCommand,
 	buildGainCommand,
 	buildGetClockCommand,
 	buildImportAudioPresetCommand,
@@ -227,7 +225,7 @@ test('maps the Newton legacy ACK to green and a non-ACK to red', async () => {
 	}
 	await getActionDefinitions(successfulClient, logger).set_gain.callback(action)
 	assert.deepEqual(reports.at(-1), {
-		name: 'Set Gain',
+		name: 'Set Gain and Mute State',
 		success: true,
 		responseHex: '3300',
 		error: undefined,
@@ -243,7 +241,7 @@ test('maps the Newton legacy ACK to green and a non-ACK to red', async () => {
 	}
 	await getActionDefinitions(failingClient, logger).set_gain.callback(action)
 	assert.deepEqual(reports.at(-1), {
-		name: 'Set Gain',
+		name: 'Set Gain and Mute State',
 		success: false,
 		responseHex: '6600',
 		error: 'device returned an error',
@@ -279,7 +277,6 @@ test('restored snapshot database action sends Get Database and reports its contr
 		[],
 		new Map(),
 		new Map(),
-		() => undefined,
 		() => false,
 		() => true,
 	)
@@ -393,28 +390,6 @@ test('config diff keeps host, meter and gain/mute restarts independent', () => {
 	})
 })
 
-test('builds Delay as 11 bytes with sample count and bypass', () => {
-	assert.equal(
-		buildDelayCommand({
-			channelType: ChannelType.InputDsp,
-			channelIndex: 1,
-			delaySamples: 600,
-			bypass: true,
-		}).toString('hex'),
-		'0200010000005802000001',
-	)
-})
-
-test('builds the 66-byte Fader command without a count byte', () => {
-	const gains = Array.from({ length: 16 }, (_, index) => index / 10)
-	const command = buildFaderCommand({ channelType: ChannelType.InputDsp, gains })
-	assert.equal(command.length, 66)
-	assert.equal(command.subarray(0, 2).toString('hex'), '1d00')
-	assert.equal(command.readFloatLE(2).toFixed(1), '0.0')
-	assert.equal(command.readFloatLE(62).toFixed(1), '1.5')
-	assert.throws(() => buildFaderCommand({ channelType: ChannelType.InputDsp, gains: [0] }))
-})
-
 test('builds documented H2L priority read and read-modify-write rearm packets', () => {
 	assert.equal(buildReadPriorityListCommand(7).toString('hex'), '91336607')
 	assert.equal(
@@ -427,7 +402,6 @@ test('builds documented H2L priority read and read-modify-write rearm packets', 
 test('parses legacy OK and ERR responses', () => {
 	assert.deepEqual(parseLegacyResponse(Buffer.from('33000102', 'hex')), {
 		success: true,
-		command: 0x33,
 		payload: Buffer.from('0102', 'hex'),
 	})
 	assert.equal(parseLegacyResponse(Buffer.from('6600', 'hex')).success, false)
@@ -536,7 +510,7 @@ test('decodes documented 1024-byte VU status peak and RMS meters as dB', () => {
 	packet.writeFloatLE(0.1, 128) // input RMS ch1
 	packet.writeFloatLE(0.01, 320) // output RMS ch1
 	const decoded = decodeStatusMeters(packet)
-	assert.equal(decoded.format, 'status-1024-peak-db')
+	assert.equal(decoded.format, 'status-1024-peak-rms-db')
 	assert.equal(decoded.inputDsp[0], 0)
 	assert.equal(decoded.inputDsp[1].toFixed(2), '-20.00')
 	assert.equal(decoded.outputDsp[0].toFixed(2), '-6.02')
@@ -740,29 +714,6 @@ test('a TCP connection error keeps one helper and lets its delayed retry own rec
 	// constructing another one synchronously here caused a busy reconnect loop.
 	assert.equal(sockets.length, 1)
 	assert.equal(sockets[0].destroyed, false)
-	client.destroy()
-})
-
-test('a no-wait send that returns false invalidates the session instead of silently succeeding', async () => {
-	let socket
-	socket = new FakeSocket(() => {
-		socket.isConnected = false
-		return Promise.resolve(false)
-	})
-	const client = new NewtonTcpClient('newton', 6668, () => socket)
-	const commandErrors = []
-	let disconnected = 0
-	client.on('commandError', (name, error) => commandErrors.push({ name, error }))
-	client.on('disconnected', () => disconnected++)
-	client.connect()
-	socket.emit('connect')
-	client.sendCommandNoWait(Buffer.from('0100', 'hex'))
-	await sleep(0)
-
-	assert.equal(commandErrors.length, 1)
-	assert.equal(commandErrors[0].name, '0x01')
-	assert.match(commandErrors[0].error.message, /failed to send/)
-	assert.equal(disconnected, 1)
 	client.destroy()
 })
 
@@ -1063,12 +1014,19 @@ test('rearm-this-input action targets the input registered by the label feedback
 			return { success: true, rx, parsed: opts.parser ? opts.parser(rx) : undefined }
 		},
 	}
-	const logger = { log: () => undefined, reportActionResult: () => undefined }
+	const reports = []
+	const logger = { log: () => undefined, reportActionResult: (result) => reports.push(result) }
 	const actions = getActionDefinitions(client, logger, rearmTargets)
 
 	await actions.rearm_this_input.callback({ controlId: 'ctrl1', options: {} })
 	assert.equal(sent[0], '91336604')
 	assert.equal(sent[1], '903366040800d8d800000100')
+	// The composed action publishes exactly one result: its intermediate 0x91
+	// read must not overwrite the button's Last Action state.
+	assert.deepEqual(
+		reports.map((result) => result.name),
+		['Rearm This Button Input'],
+	)
 
 	// Without a label feedback on the control the action must not send anything.
 	sent.length = 0
@@ -1249,7 +1207,6 @@ test('snapshot apply by name uses the device list for the dropdown and applies b
 		snapshotList,
 		new Map(),
 		new Map(),
-		() => undefined,
 		() => false,
 		() => true,
 	)
@@ -1328,7 +1285,6 @@ test('snapshot label feedback writes the name and feeds the apply action', async
 		snapshotList,
 		snapshotTargets,
 		new Map(),
-		() => undefined,
 		() => false,
 		() => true,
 	)
@@ -1381,7 +1337,6 @@ test('a deleted snapshot clears its button target and cannot be applied', async 
 		[],
 		snapshotTargets,
 		new Map(),
-		() => undefined,
 		() => false,
 		() => true,
 	)
@@ -1579,7 +1534,8 @@ test('first release ships no tombstone definitions and only canonical variable I
 	]) {
 		assert.equal(ids.has(id), true, id)
 	}
-	// No 0-based IDs and none of the removed legacy alias families.
+	// No 0-based IDs, none of the removed legacy alias families, and none of
+	// the removed hardwired "selected"/raw-diagnostic variables.
 	for (const id of [
 		'priority_input_0',
 		'vu_input_0',
@@ -1591,6 +1547,17 @@ test('first release ships no tombstone definitions and only canonical variable I
 		'vu_in_16',
 		'vu_out_1',
 		'vu_out_16',
+		'priority_selected_active',
+		'priority_selected_highest',
+		'priority_selected_forced',
+		'priority_selected_forced_channel',
+		'priority_selected_overridden',
+		'priority_read_list_status',
+		'vu_selected',
+		'vu_selected_peak',
+		'vu_selected_clip',
+		'vu_raw_length',
+		'vu_raw_first_hex',
 	]) {
 		assert.equal(ids.has(id), false, id)
 	}
@@ -1702,7 +1669,7 @@ test('builds the 0x21 request and parses gain/mute banks from the audio preset b
 	assert.equal(presetAudioReadOptions().isSuccess(malformedAck), false)
 })
 
-test('level up/down reads fresh 0x21 state, ignores stale cache, and writes it back', async () => {
+test('level up/down reads fresh 0x21 state and writes it back', async () => {
 	const sent = []
 	const inputDsp = []
 	const outputDsp = []
@@ -1725,11 +1692,7 @@ test('level up/down reads fresh 0x21 state, ignores stale cache, and writes it b
 		reportActionResult: () => undefined,
 		reportGainRead: (_type, _index, state) => reads.push(state),
 	}
-	// Deliberately stale conflicting cache: Level must use the live 0x21 value.
-	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], new Map(), new Map(), () => ({
-		gainDb: -70,
-		muted: true,
-	}))
+	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], new Map(), new Map())
 
 	await actions.adjust_gain.callback({
 		options: { channelType: ChannelType.OutputDsp, channel: 3, direction: 'up', deltaDb: 2.5 },
@@ -1947,7 +1910,6 @@ test('snapshot actions fail fast on pre-0.98 firmware without sending', async ()
 		[{ uuid: 'uuid-1', name: 'Cached snapshot' }],
 		snapshotTargets,
 		new Map(),
-		() => undefined,
 		() => true,
 	)
 
@@ -1990,10 +1952,6 @@ test('every gain write is clamped to the device-safe -80..+6 dB window', async (
 	assert.throws(() => gain(Number.NaN), /finite number/)
 	assert.throws(() => gain(Number.POSITIVE_INFINITY), /finite number/)
 	assert.equal(gain(-4.5), -4.5)
-	const fader = buildFaderCommand({ channelType: 0, gains: [30, -200, ...Array(14).fill(0)] })
-	assert.equal(fader.readFloatLE(2), 6)
-	assert.equal(fader.readFloatLE(6), -80)
-	assert.throws(() => buildFaderCommand({ channelType: 0, gains: [Number.NaN, ...Array(15).fill(0)] }), /finite/)
 
 	// A mute toggle must not echo an out-of-range device gain read from 0x21.
 	const sent = []
@@ -2209,7 +2167,6 @@ test('snapshot label shows a loading state and keeps its target until the databa
 		cachedSnapshots,
 		snapshotTargets,
 		new Map(),
-		() => undefined,
 		() => false,
 		() => false,
 	)

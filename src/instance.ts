@@ -168,7 +168,6 @@ export class NewtonInstance extends InstanceBase<ModuleConfig> {
 				state.snapshotList,
 				this.snapshotTargets,
 				this.muteTargets,
-				(channelType, channelIndex) => this.session.getState().gainReads.get(gainKey(channelType, channelIndex)),
 				() => this.session.getState().snapshotsUnsupported,
 				() => this.session.getState().snapshotDatabaseLoaded,
 				this.gainMutationQueues,

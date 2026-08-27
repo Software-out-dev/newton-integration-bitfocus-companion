@@ -29,7 +29,7 @@ export interface VuLevels {
 	inputDspRms: number[]
 	outputDspRms: number[]
 	raw: Buffer
-	format: 'status-1024-peak-db'
+	format: 'status-1024-peak-rms-db'
 }
 
 interface UdpRemoteInfo {
@@ -130,7 +130,7 @@ export function decodeStatusMeters(data: Buffer): VuLevels | null {
 		inputDspRms.push(antilogToDb(data.readFloatLE(INPUT_RMS_OFFSET + i * 4), 20))
 		outputDspRms.push(antilogToDb(data.readFloatLE(OUTPUT_RMS_OFFSET + i * 4), 20))
 	}
-	return { inputDsp, outputDsp, inputDspRms, outputDspRms, raw: data, format: 'status-1024-peak-db' }
+	return { inputDsp, outputDsp, inputDspRms, outputDspRms, raw: data, format: 'status-1024-peak-rms-db' }
 }
 
 function antilogToDb(value: number, multiplier: number): number {

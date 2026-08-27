@@ -52,7 +52,6 @@ export interface NewtonTcpClientEvents {
 	connected: []
 	disconnected: []
 	error: [error: Error]
-	rawData: [direction: 'TX' | 'RX', data: Buffer]
 	commandResult: [result: NewtonCommandResult<unknown>]
 	commandError: [name: string, error: Error]
 	legacyResponse: [data: Buffer]
@@ -166,7 +165,6 @@ export class NewtonTcpClient extends EventEmitter<NewtonTcpClientEvents> {
 		})
 		socket.on('data', (data: Buffer) => {
 			if (this.socket !== socket) return
-			this.emit('rawData', 'RX', data)
 			this.accumulator.feed(data)
 		})
 		socket.on('error', (err: Error) => {
@@ -186,17 +184,6 @@ export class NewtonTcpClient extends EventEmitter<NewtonTcpClientEvents> {
 		socket.on('status_change', (status, message) => {
 			if (this.socket === socket) this.emit('statusChange', status, message)
 		})
-	}
-
-	reconnect(host: string, port: number = PORT_TCP): void {
-		this.host = host
-		this.port = port
-		this.connect()
-	}
-
-	async sendCommand(cmd: Buffer): Promise<Buffer> {
-		const result = await this.sendCommandExpect(cmd)
-		return result.rx
 	}
 
 	async sendCommandExpect<TParsed = Buffer>(
@@ -255,27 +242,6 @@ export class NewtonTcpClient extends EventEmitter<NewtonTcpClientEvents> {
 			this.enqueue(item)
 			void this.processQueue()
 		})
-	}
-
-	/** Send a command which intentionally has no reply to associate. */
-	sendCommandNoWait(cmd: Buffer): void {
-		const socket = this.socket
-		if (!socket?.isConnected) return
-		this.emit('rawData', 'TX', cmd)
-		const name = `0x${(cmd[0] ?? 0).toString(16).padStart(2, '0')}`
-		void socket
-			.send(cmd)
-			.then((sent) => {
-				if (!sent && this.socket === socket) {
-					// A false result means the helper lost the connection between the
-					// isConnected check above and its write attempt. Let its delayed
-					// reconnect recover the transport, but never claim the command ran.
-					this.handleSocketFailure(socket, new Error(`${name} failed to send`), name, false)
-				}
-			})
-			.catch((err) => {
-				if (this.socket === socket) this.handleSocketFailure(socket, toError(err), name)
-			})
 	}
 
 	get isConnected(): boolean {
@@ -348,7 +314,6 @@ export class NewtonTcpClient extends EventEmitter<NewtonTcpClientEvents> {
 		item.timer = setTimeout(() => this.handleTimeout(item), item.options.timeoutMs)
 
 		try {
-			this.emit('rawData', 'TX', item.cmd)
 			const sent = await socket.send(item.cmd)
 			if (this.activeCommand !== item || this.socket !== socket) return
 			if (!sent)

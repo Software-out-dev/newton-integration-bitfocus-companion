@@ -3,7 +3,6 @@ import type { ChannelType, SnapshotApplyMode } from './constants.js'
 /** Result of parsing a legacy protocol response */
 export interface LegacyResponse {
 	success: boolean
-	command: number
 	payload: Buffer
 }
 
@@ -46,8 +45,7 @@ export interface ClockPriorityState {
 }
 
 export interface VuState {
-	rawLength: number
-	rawFirstHex: string
+	/** Stream status shown to operators: the decoded format, or the loss reason. */
 	format: string
 }
 
@@ -70,50 +68,12 @@ export interface GainParams {
 	mute: boolean
 }
 
-/** Delay command parameters */
-export interface DelayParams {
-	channelType: ChannelType
-	channelIndex: number
-	/** Delay expressed in device samples, not milliseconds. */
-	delaySamples: number
-	/** True bypasses the delay processor while retaining its configured value. */
-	bypass: boolean
-}
-
-/** Polarity command parameters */
-export interface PolarityParams {
-	channelType: ChannelType
-	channelIndex: number
-	inverted: boolean
-}
-
-/** Matrix assignment parameters */
-export interface MatrixParams {
-	outputChannel: number
-	inputValue: number
-}
-
 /** Snapshot apply parameters */
 export interface SnapshotApplyParams {
 	uuid: string
 	fadingTime?: number
 	mode?: SnapshotApplyMode
 	parts?: string[]
-}
-
-/** Snapshot store parameters */
-export interface SnapshotStoreParams {
-	author?: string
-	description?: string
-	place?: string
-	recall?: string[]
-	[key: string]: unknown
-}
-
-/** Snapshot metadata update parameters */
-export interface SnapshotUpdateMetadataParams {
-	uuid: string
-	[key: string]: unknown
 }
 
 /** Device state tracked by the module */
@@ -179,10 +139,4 @@ export interface NewtonState {
 	 * rejected the snapshot database read. Cleared on reconnect.
 	 */
 	snapshotsUnsupported: boolean
-}
-
-/** Fader description (multi-channel gain set) */
-export interface FaderParams {
-	channelType: ChannelType
-	gains: number[] // array of float gain values in dB, one per channel
 }

@@ -215,10 +215,8 @@ export class NewtonSession {
 			void this.pollPresetAudio()
 			this.startPresetAudioPolling()
 
-			if (SETTINGS.enablePriorityPolling) {
-				void this.pollPriorityMetadata()
-				this.startPriorityPolling()
-			}
+			void this.pollPriorityMetadata()
+			this.startPriorityPolling()
 			if (!this.vuListener) this.startVuListener()
 		})
 
@@ -268,13 +266,6 @@ export class NewtonSession {
 			this.companion.updateStatus(status, message ?? undefined)
 		})
 
-		client.on('rawData', (direction, data) => {
-			if (!this.isCurrentClient(client)) return
-			if (SETTINGS.debugLevel === 'verbose') {
-				this.companion.log('debug', `${direction}: [${formatBufferDiagnostic(data)}] (${data.length} bytes)`)
-			}
-		})
-
 		client.on('commandResult', (result) => {
 			if (!this.isCurrentClient(client)) return
 			this.state.lastCommand = result.name
@@ -285,7 +276,7 @@ export class NewtonSession {
 			// last_action_* and the per-button feedbacks, which background
 			// polling never touches.
 			this.state.lastError = result.success ? '' : (result.error ?? 'Unknown command error')
-			if (!result.success && SETTINGS.debugLevel !== 'off') {
+			if (!result.success) {
 				this.companion.log('warn', `${result.name}: ${this.state.lastError} RX [${this.state.lastResponseHex}]`)
 			}
 			this.companion.updateVariables()
@@ -296,13 +287,10 @@ export class NewtonSession {
 			// Queue governance (TTL expiry, poll eviction) is the design working
 			// under load, not a device error: keep it out of last_error and
 			// alarm-level logs so operator triggers cannot false-fire.
-			if (isQueueRejection(err)) {
-				if (SETTINGS.debugLevel === 'verbose') this.companion.log('debug', `${name}: ${err.message}`)
-				return
-			}
+			if (isQueueRejection(err)) return
 			this.state.lastCommand = name
 			this.state.lastError = err.message
-			if (SETTINGS.debugLevel !== 'off') this.companion.log('error', `${name}: ${err.message}`)
+			this.companion.log('error', `${name}: ${err.message}`)
 			this.companion.updateVariables()
 		})
 
@@ -327,24 +315,15 @@ export class NewtonSession {
 		// a false "Newton ERR response" warning.
 		if (!isLegacyAckResponse(data)) return
 		// Past the guard the payload is exactly the 2-byte 3300/6600 status.
-		const hex = data.toString('hex')
-		const response = parseLegacyResponse(data)
-		if (!response.success && SETTINGS.debugLevel !== 'off') {
-			this.companion.log('warn', `Newton ERR response: [${hex}]`)
-		} else if (SETTINGS.debugLevel === 'verbose') {
-			this.companion.log('debug', `Newton OK response: [${hex}]`)
+		if (!parseLegacyResponse(data).success) {
+			this.companion.log('warn', `Newton ERR response: [${data.toString('hex')}]`)
 		}
 	}
 
 	private handleSPRResponse(response: SPRResponse): void {
 		if (!response.success) {
-			if (SETTINGS.debugLevel !== 'off') {
-				this.companion.log('warn', `SPR error for command 0x${response.command.toString(16).padStart(4, '0')}`)
-			}
+			this.companion.log('warn', `SPR error for command 0x${response.command.toString(16).padStart(4, '0')}`)
 			return
-		}
-		if (SETTINGS.debugLevel === 'verbose') {
-			this.companion.log('debug', `SPR response for command 0x${response.command.toString(16).padStart(4, '0')}`)
 		}
 		this.updateSnapshotState(response)
 	}
@@ -367,22 +346,9 @@ export class NewtonSession {
 			this.state.lastAppliedSnapshot = formatStructuredDiagnostic(response.payload)
 			this.state.lastSnapshotResponse = 'Apply OK'
 			this.companion.updateVariables()
-			return
 		}
-
-		if (
-			command === Number(SnapshotCmd.Store) ||
-			command === Number(SnapshotCmd.Delete) ||
-			command === Number(SnapshotCmd.RecallSafeGet) ||
-			command === Number(SnapshotCmd.RecallSafeSet)
-		) {
-			this.state.lastSnapshotResponse = formatStructuredDiagnostic(response.payload ?? { ok: true })
-			this.companion.updateVariables()
-			// Store/Delete change the database: refresh the by-name dropdown.
-			if (command === Number(SnapshotCmd.Store) || command === Number(SnapshotCmd.Delete)) {
-				this.requestSnapshotDatabase()
-			}
-		}
+		// GetDatabase and Apply are the only SPC requests this module sends, so
+		// no other SPR command id can arrive as a reply on this session.
 	}
 
 	// The payload has already been validated by parseSnapshotDatabase().
@@ -406,7 +372,7 @@ export class NewtonSession {
 		this.state.snapshotCount = 0
 		this.state.lastSnapshotResponse = 'Invalid snapshot database response'
 		this.state.lastError = 'Snapshot database response is malformed'
-		if (SETTINGS.debugLevel !== 'off') this.companion.log('warn', this.state.lastError)
+		this.companion.log('warn', this.state.lastError)
 		this.companion.updateVariables()
 		this.companion.checkFeedbacks('snapshot_apply_label')
 	}
@@ -799,8 +765,9 @@ export class NewtonSession {
 		}
 	}
 
-	// Clock priority lists (0x81) change rarely: one clock type per tick
-	// round-robin, full sweep of the 3 types every ~300 ms.
+	// Clock priority lists (0x81) change rarely: one clock type per shared
+	// priorityMetadataPollInterval tick (1 s) round-robin — a full sweep of
+	// the 3 types every ~3 s.
 	private nextClockType = 0
 
 	private async pollNextClockList(client: NewtonTcpClient | null = this.tcpClient): Promise<void> {
@@ -866,7 +833,6 @@ export class NewtonSession {
 		this.udpStreamLost = false
 		const listener = new VuListener(this.config.host, SETTINGS.vuPort, this.config.meter_poll_interval)
 		this.vuListener = listener
-		let loggedFirstPacket = false
 
 		listener.on('vuLevels', (levels) => {
 			if (this.destroyed || this.vuListener !== listener) return
@@ -880,16 +846,7 @@ export class NewtonSession {
 			this.state.vuInputDspRms = levels.inputDspRms
 			this.state.vuOutputDspRms = levels.outputDspRms
 			this.state.vu.format = levels.format
-			this.state.vu.rawLength = levels.raw.length
-			this.state.vu.rawFirstHex = levels.raw.subarray(0, 32).toString('hex')
 			this.state.lastVuUpdate = new Date().toISOString()
-			if (!loggedFirstPacket && SETTINGS.debugLevel === 'verbose') {
-				loggedFirstPacket = true
-				this.companion.log(
-					'debug',
-					`VU first status: ${levels.raw.length} bytes [${levels.raw.subarray(0, 32).toString('hex')}]`,
-				)
-			}
 			this.companion.updateVuVariables()
 		})
 
@@ -973,11 +930,7 @@ export class NewtonSession {
 		this.state.vuOutputDsp = []
 		this.state.vuInputDspRms = []
 		this.state.vuOutputDspRms = []
-		this.state.vu = {
-			rawLength: 0,
-			rawFirstHex: '',
-			format,
-		}
+		this.state.vu = { format }
 		this.state.lastVuUpdate = ''
 		this.companion.publishVuVariablesNow()
 	}

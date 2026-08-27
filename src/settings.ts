@@ -1,4 +1,4 @@
-import { ChannelType, PORT_METERS, PORT_TCP } from './protocol/constants.js'
+import { PORT_METERS, PORT_TCP } from './protocol/constants.js'
 
 /** Fixed runtime settings, not exposed in the connection config UI. */
 export interface ModuleSettings {
@@ -9,12 +9,7 @@ export interface ModuleSettings {
 	presetAudioTimeoutMs: number
 	actionQueueTtlMs: number
 	snapshotDbRetryMs: number
-	debugLevel: 'off' | 'errors' | 'verbose'
 	vuPort: number
-	vuMonitorChannelType: ChannelType
-	vuMonitorChannelIndex: number
-	enablePriorityPolling: boolean
-	priorityMonitorChannelIndex: number
 }
 
 // Keep command failure visible promptly and release the serialized control
@@ -38,10 +33,5 @@ export const SETTINGS: ModuleSettings = {
 	// A connect-time snapshot database read that expired behind a long preset
 	// transfer is retried on this cadence until it lands.
 	snapshotDbRetryMs: 5000,
-	debugLevel: 'errors',
 	vuPort: PORT_METERS,
-	vuMonitorChannelType: ChannelType.InputDsp,
-	vuMonitorChannelIndex: 0,
-	enablePriorityPolling: true,
-	priorityMonitorChannelIndex: 0,
 }

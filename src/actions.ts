@@ -147,11 +147,17 @@ function validSnapshotApplyMode(
 	return null
 }
 
+/**
+ * Read one input's H2L priority list (0x91). Publishes a Last Action result
+ * only when `report` is set: composed actions (the rearm flows) keep their own
+ * final outcome as the button's result and only log the intermediate read.
+ */
 async function readPriorityList(
 	client: NewtonActionClient,
 	logger: Logger,
 	channelIndex: number,
 	controlId?: string,
+	report = false,
 ): Promise<PriorityListState | null> {
 	const cmd = buildReadPriorityListCommand(channelIndex)
 	try {
@@ -162,35 +168,34 @@ async function readPriorityList(
 			parser: parsePriorityListResponse,
 		})
 		if (result.success && result.parsed) {
-			logger.reportActionResult?.({
-				name: 'Read Priority List',
-				success: true,
-				responseHex: formatActionResponseHex(result.rx),
-				controlId,
-			})
+			if (report) {
+				logger.reportActionResult?.({
+					name: 'Read Priority List',
+					success: true,
+					responseHex: formatActionResponseHex(result.rx),
+					controlId,
+				})
+			}
 			return result.parsed
 		}
 		const error = result.error ?? 'invalid response'
-		logger.reportActionResult?.({
-			name: 'Read Priority List',
-			success: false,
-			responseHex: formatActionResponseHex(result.rx),
-			error,
-			controlId,
-		})
+		if (report) {
+			logger.reportActionResult?.({
+				name: 'Read Priority List',
+				success: false,
+				responseHex: formatActionResponseHex(result.rx),
+				error,
+				controlId,
+			})
+		}
 		logger.log('warn', `Read Priority List: ${error}`)
 	} catch (err) {
 		const error = err instanceof Error ? err.message : String(err)
-		reportActionFailure(logger, 'Read Priority List', error, controlId)
+		if (report) reportActionFailure(logger, 'Read Priority List', error, controlId)
+		else logger.log('error', `Read Priority List: ${error}`)
 	}
 	return null
 }
-
-/**
- * Provider retained for the module wiring and feedback cache. Read-modify-write
- * actions deliberately do not use it: they obtain a fresh 0x21 state first.
- */
-export type GainReadProvider = (channelType: number, channelIndex: number) => GainReadState | undefined
 
 /**
  * Read one Input/Output gain state from the full 0x21 audio-preset response.
@@ -263,7 +268,9 @@ async function rearmClock(
 		})
 		if (result.success && result.parsed) clock = result.parsed
 	} catch (err) {
-		reportActionFailure(logger, 'Get Processing Clock', err instanceof Error ? err.message : String(err), controlId)
+		// Intermediate read of a composed action: log it, but let the rearm
+		// action below publish the button's single Last Action result.
+		logger.log('error', `Get Processing Clock: ${err instanceof Error ? err.message : String(err)}`)
 	}
 	if (!clock) {
 		reportActionFailure(logger, name, 'cancelled because the current clock settings could not be read', controlId)
@@ -286,16 +293,13 @@ export function getActionDefinitions(
 	snapshotTargets: Map<string, string> = new Map(),
 	// controlId -> channel registered by the channel-mute feedback.
 	muteTargets: Map<string, { channelType: number; channelIndex: number }> = new Map(),
-	// Retained for the module wiring and feedback cache. Gain mutations always
-	// issue a fresh 0x21 read instead of using this potentially stale cache.
-	_getGainRead: GainReadProvider = () => undefined,
 	// True when the connected firmware predates snapshots (< 0.98); the
 	// snapshot actions then fail fast with a clear message.
 	snapshotsUnsupported: () => boolean = () => false,
 	// Distinguishes a successfully read empty database from one not read yet.
 	snapshotDatabaseLoaded: () => boolean = () => false,
-	// Kept by main across definition refreshes so a configuration/UI refresh
-	// cannot split two read-modify-write operations for the same channel.
+	// Kept by the instance across definition refreshes so a configuration/UI
+	// refresh cannot split two read-modify-write operations for the same channel.
 	gainMutationQueues: Map<string, Promise<void>> = new Map(),
 ): CompanionActionDefinitions {
 	const snapshotChoices = [
@@ -407,14 +411,17 @@ export function getActionDefinitions(
 				},
 			],
 			callback: async (action) => {
-				const channelType = validChannelType(action.options['channelType'], logger, 'Set Gain', action.controlId)
+				// Reported under the displayed action name, so the Last Newton Action
+				// feedbacks can match what the operator sees in the actions list.
+				const name = 'Set Gain and Mute State'
+				const channelType = validChannelType(action.options['channelType'], logger, name, action.controlId)
 				if (channelType === null) return
 				const channel = Number(action.options['channelIndex'])
 				const channelCount = channelCountForType(channelType)
 				if (!Number.isInteger(channel) || channel < 1 || channel > channelCount) {
 					reportActionFailure(
 						logger,
-						'Set Gain',
+						name,
 						`channel must be between 1 and ${channelCount} for the selected channel type`,
 						action.controlId,
 					)
@@ -422,12 +429,12 @@ export function getActionDefinitions(
 				}
 				const gainDb = action.options['gainDb']
 				if (typeof gainDb !== 'number' || !Number.isFinite(gainDb)) {
-					reportActionFailure(logger, 'Set Gain', 'gain must be a finite number', action.controlId)
+					reportActionFailure(logger, name, 'gain must be a finite number', action.controlId)
 					return
 				}
 				const mute = action.options['mute']
 				if (typeof mute !== 'boolean') {
-					reportActionFailure(logger, 'Set Gain', 'mute must be a boolean value', action.controlId)
+					reportActionFailure(logger, name, 'mute must be a boolean value', action.controlId)
 					return
 				}
 				const params = {
@@ -443,7 +450,7 @@ export function getActionDefinitions(
 					const written = await buildAndRunCommand(
 						client,
 						logger,
-						'Set Gain',
+						name,
 						() => buildGainCommand(params),
 						action.controlId,
 					)
@@ -490,6 +497,7 @@ export function getActionDefinitions(
 					type: 'number',
 					label: 'Fading Time (ms)',
 					id: 'fadingTime',
+					tooltip: '0 applies the snapshot instantly. Any fade must be 2000-65535 ms; Newton rejects 1-1999 ms.',
 					default: 2000,
 					min: 0,
 					max: 65535,
@@ -589,6 +597,7 @@ export function getActionDefinitions(
 					type: 'number',
 					label: 'Fading Time (ms)',
 					id: 'fadingTime',
+					tooltip: '0 applies the snapshot instantly. Any fade must be 2000-65535 ms; Newton rejects 1-1999 ms.',
 					default: 2000,
 					min: 0,
 					max: 65535,
@@ -701,7 +710,7 @@ export function getActionDefinitions(
 					reportActionFailure(logger, 'Read Priority List', 'input must be between 1 and 16', action.controlId)
 					return
 				}
-				await readPriorityList(client, logger, input - 1, action.controlId)
+				await readPriorityList(client, logger, input - 1, action.controlId, true)
 			},
 		},
 

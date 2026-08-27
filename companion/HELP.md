@@ -60,6 +60,8 @@ Gain and mute feedbacks refresh from the complete Newton audio-preset payload (`
 
 **Apply Snapshot**: pick the snapshot by name in the label feedback; the button shows the snapshot name and pressing it applies it, with the fading time and transition mode set in the action options. The name list is read from the device when the module connects. A dropdown action, "Snapshot Apply (by name)", is also available for triggers. Run **Refresh Snapshot Database** after snapshots are added, renamed or removed outside Companion.
 
+The **fading time** must be `0` (apply instantly) or between `2000` and `65535` ms: Newton does not support fades of 1-1999 ms, and the module rejects such values with a log message instead of sending them.
+
 Snapshots require Newton **firmware 0.98 or later**. The module reads the firmware version when it connects: on older firmware (e.g. 0.97) the snapshot actions are disabled with a clear log message, the snapshot button label shows `NO SNAPSHOT / FW < 0.98`, and `$(outline-newton:snapshot_support)` reads `Unsupported by firmware`. Every other feature keeps working.
 
 ## Metering
@@ -75,10 +77,13 @@ Per-channel values are also published as `$(outline-newton:vu_input_1)`..`vu_inp
 - **Connection Status**: shows `NEWTON ONLINE` (green) or `OFFLINE` (red).
 - Boolean **Device Connected** and **Last Action Success/Error** feedbacks are available for triggers.
 
+The optional "Action name" filter of the Last Action feedbacks matches the action name exactly as shown in the actions list (for example `Set Gain and Mute State`, `Snapshot Apply (by name)`, `Rearm Priority Patch`, `Level Up / Down`); leave it blank to match any action.
+
 ## Variables
 
 - `$(outline-newton:connection_state)`: `Connected` or `Disconnected`.
 - `$(outline-newton:priority_input_1)`..`priority_input_16` and `priority_aux_input_1`..`priority_aux_input_8`: active source per priority patch, shown with 1-based source numbering (`N/A` when Newton reports no source).
 - `$(outline-newton:vu_input_1)`..`vu_input_16` and `vu_output_1`..`vu_output_16`: per-channel meter levels (1-based).
 - `$(outline-newton:snapshot_support)`: `OK`, `Unknown` or `Unsupported by firmware` (firmware < 0.98).
+- `$(outline-newton:vu_format)`: VU stream status. Reads `status-1024-peak-rms-db` while UDP meter packets are being decoded, otherwise the loss reason (`No VU packets` or `UDP error: …`).
 - `$(outline-newton:last_error)`, `last_priority_update`, `last_vu_update`: diagnostics. Large protocol replies are summarized rather than published in full.

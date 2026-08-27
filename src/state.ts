@@ -44,8 +44,6 @@ export function createInitialNewtonState(): NewtonState {
 		snapshotDatabaseLoaded: false,
 		snapshotsUnsupported: false,
 		vu: {
-			rawLength: 0,
-			rawFirstHex: '',
 			format: 'No VU packets',
 		},
 	}

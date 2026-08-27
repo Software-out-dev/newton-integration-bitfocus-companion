@@ -13,7 +13,6 @@ import {
 	SPR_HEADER,
 	SPR_HEADER_SIZE,
 	SPR_NOERR,
-	SPC_HEADER,
 } from './constants.js'
 import { verifyCrc16 } from './crc16.js'
 import type { ClockPriorityState, GainReadState, LegacyResponse, PriorityListState, SPRResponse } from './types.js'
@@ -32,13 +31,11 @@ export const LEGACY_HEADER_SIZE = 2
  */
 export function parseLegacyResponse(data: Buffer): LegacyResponse {
 	if (data.length < LEGACY_HEADER_SIZE) {
-		return { success: false, command: 0, payload: Buffer.alloc(0) }
+		return { success: false, payload: Buffer.alloc(0) }
 	}
 
-	const replyCode = data[0]
 	return {
-		success: replyCode === REPLY_OK,
-		command: replyCode,
+		success: data[0] === REPLY_OK,
 		payload: data.subarray(LEGACY_HEADER_SIZE),
 	}
 }
@@ -111,14 +108,6 @@ export function parseSPR(data: Buffer): SPRResponse | null {
 	}
 
 	return { command: cmd, success, payload, rawPayload }
-}
-
-/**
- * Determine if a buffer starts with a Special Protocol message (SPC or SPR).
- */
-export function isSpecialProtocol(data: Buffer): boolean {
-	if (data.length < 1) return false
-	return data[0] === SPC_HEADER || data[0] === SPR_HEADER
 }
 
 /**

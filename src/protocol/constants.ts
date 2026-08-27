@@ -1,10 +1,6 @@
 // ===== Network Ports =====
-export const PORT_UDP = 6666 // Legacy UDP discovery
 export const PORT_METERS = 6667 // Newton UDP meter/status server
 export const PORT_TCP = 6668 // Newton TCP control server
-export const PORT_BROADCAST = 6669 // UDP broadcast notifications
-export const PORT_UDP_COMMAND = 6670 // Secondary UDP command server
-export const PORT_STATUS = 6671 // UDP status server
 
 // ===== Legacy Command IDs (first message byte) =====
 export enum LegacyCmd {
@@ -161,7 +157,6 @@ export function clampGainDb(gainDb: number): number {
 export const REPLY_OK = 0x33
 export const REPLY_ERR = 0x66
 export const SPR_NOERR = 0x3300
-export const SPR_WERR = 0x6600
 
 // ===== Channel Types =====
 export enum ChannelType {
@@ -179,25 +174,6 @@ export enum SnapshotApplyMode {
 	ThroughZero = 'ThroughZero',
 }
 
-// ===== Snapshot Parts (recall areas) =====
-export const SNAPSHOT_PARTS = {
-	ALL: '/',
-	DSP: '/DSP',
-	DSP_INPUT: '/DSP/INPUT',
-	DSP_INPUT_GAIN: '/DSP/INPUT/GAIN',
-	DSP_INPUT_FILTER: '/DSP/INPUT/FILTER',
-	DSP_OUTPUT: '/DSP/OUTPUT',
-	DSP_OUTPUT_GAIN: '/DSP/OUTPUT/GAIN',
-	DSP_OUTPUT_FILTER: '/DSP/OUTPUT/FILTER',
-	DSP_MATRIX: '/DSP/MATRIX',
-	DSP_AUXMIXER: '/DSP/AUXMIXER',
-	INPUT_PATCH: '/INPUTPATCH',
-	OUTPUT_PATCH: '/OUTPUTPATCH',
-	CLOCK_CONFIG: '/CLOCKCONFIG',
-	DIRECT_OUT: '/DIRECTOUT',
-	MACHINE_CONF: '/MACHINECONF',
-} as const
-
 // ===== Fixed Protocol Values =====
 export const FIXED_BYTE_0x33 = 0x33
 export const FIXED_BYTE_0x66 = 0x66
@@ -206,26 +182,12 @@ export const FIXED_BYTE_0x66 = 0x66
 export const CRC16_POLYNOMIAL = 0xa001
 export const CRC16_INITIAL = 0x0000
 
-// ===== SPC Message Structure Offsets =====
-export const SPC_OFFSET_HEADER = 0 // 0xF0
-export const SPC_OFFSET_EMPTY = 1 // 0x00
-export const SPC_OFFSET_CMD_MSB = 2
-export const SPC_OFFSET_CMD_LSB = 3
-export const SPC_OFFSET_LEN_MSB = 4
-export const SPC_OFFSET_LEN_LSB = 5
+// ===== SPC Message Structure (header 0xF0, empty, CMD u16be, LEN u16be) =====
 export const SPC_HEADER_SIZE = 6 // bytes before payload
 export const SPC_CRC_SIZE = 2 // CRC at end
 /** Snapshot addendum §4.2.2 maximum UTF-8 JSON payload length. */
 export const SNAPSHOT_MAX_PAYLOAD_BYTES = 65_520
 
-// ===== SPR Message Structure Offsets =====
-export const SPR_OFFSET_HEADER = 0 // 0xF1
-export const SPR_OFFSET_EMPTY = 1 // 0x00
-export const SPR_OFFSET_CMD_MSB = 2
-export const SPR_OFFSET_CMD_LSB = 3
-export const SPR_OFFSET_LEN_MSB = 4
-export const SPR_OFFSET_LEN_LSB = 5
-export const SPR_OFFSET_REPLY_MSB = 6
-export const SPR_OFFSET_REPLY_LSB = 7
+// ===== SPR Message Structure (SPC header fields + standard reply u16be) =====
 export const SPR_HEADER_SIZE = 8 // bytes before payload (includes std reply)
 export const SPR_CRC_SIZE = 2
