@@ -107,7 +107,7 @@ export function parseSPR(data: Buffer): SPRResponse | null {
 		}
 	}
 
-	return { command: cmd, success, payload, rawPayload }
+	return { command: cmd, success, payload }
 }
 
 /**

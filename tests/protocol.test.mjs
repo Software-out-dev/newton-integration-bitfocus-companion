@@ -896,13 +896,13 @@ test('action definitions bind a fixed TCP session across a target change', async
 	const sessionA = {
 		sendCommandExpect: async (cmd, options) => {
 			calls.push({ session: 'A', cmd: Buffer.from(cmd), options })
-			return { name: 'A', tx: Buffer.from(cmd), rx: Buffer.from('3300', 'hex'), success: true, parsed: null }
+			return { name: 'A', rx: Buffer.from('3300', 'hex'), success: true, parsed: null }
 		},
 	}
 	const sessionB = {
 		sendCommandExpect: async (cmd, options) => {
 			calls.push({ session: 'B', cmd: Buffer.from(cmd), options })
-			return { name: 'B', tx: Buffer.from(cmd), rx: Buffer.from('3300', 'hex'), success: true, parsed: null }
+			return { name: 'B', rx: Buffer.from('3300', 'hex'), success: true, parsed: null }
 		},
 	}
 	const actionForA = bindActionClient(sessionA, 3000)
@@ -1361,23 +1361,23 @@ test('channel gain/mute feedbacks subscribe channels and render device reads', (
 
 	// No read yet → placeholder, GAIN-prefixed label.
 	assert.deepEqual(defs.channel_gain.callback({ id: 'g1', options: { channelType: 1, channel: 5 } }), {
-		text: 'GAIN OUT 5\\n--',
+		text: 'GAIN OUT 5\n--',
 	})
 
 	state.gainReads.set('1:4', { gainDb: -6, muted: false })
 	assert.deepEqual(defs.channel_gain.callback({ id: 'g1', options: { channelType: 1, channel: 5 } }), {
-		text: 'GAIN OUT 5\\n-6.0 dB',
+		text: 'GAIN OUT 5\n-6.0 dB',
 	})
 
 	// Mute feedback: MUTE-prefixed label, green OPEN / red MUTED, and it
 	// registers the channel for the mute action on the same control.
 	const open = defs.channel_mute.callback({ id: 'm1', controlId: 'ctrl9', options: { channelType: 1, channel: 5 } })
-	assert.equal(open.text, 'TOGGLE MUTE\\nOUT 5\\nUNMUTED')
+	assert.equal(open.text, 'TOGGLE MUTE\nOUT 5\nUNMUTED')
 	assert.ok(open.bgcolor !== undefined)
 	assert.deepEqual(muteTargets.get('ctrl9'), { channelType: 1, channelIndex: 4 })
 	state.gainReads.set('1:4', { gainDb: -6, muted: true })
 	const muted = defs.channel_mute.callback({ id: 'm1', controlId: 'ctrl9', options: { channelType: 1, channel: 5 } })
-	assert.equal(muted.text, 'TOGGLE MUTE\\nOUT 5\\nMUTED')
+	assert.equal(muted.text, 'TOGGLE MUTE\nOUT 5\nMUTED')
 	assert.notEqual(muted.bgcolor, open.bgcolor)
 
 	// Unsubscribing stops the channel being polled and drops the mute target.

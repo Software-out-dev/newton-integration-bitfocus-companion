@@ -78,7 +78,6 @@ export interface SendCommandExpectOptions<TParsed = Buffer> {
 
 export interface NewtonCommandResult<TParsed = Buffer> {
 	name: string
-	tx: Buffer
 	rx: Buffer
 	success: boolean
 	parsed: TParsed | null
@@ -389,7 +388,6 @@ export class NewtonTcpClient extends EventEmitter<NewtonTcpClientEvents> {
 		const error = this.describeResultError(item, data, success, parsed)
 		const result: NewtonCommandResult<unknown> = {
 			name: item.options.name,
-			tx: item.cmd,
 			rx: data,
 			success: success && !error,
 			parsed,

@@ -319,7 +319,7 @@ export function getFeedbackDefinitions(
 					label: 'Action name (blank = any action)',
 					id: 'actionName',
 					tooltip: 'Matches the action name shown in the actions list, e.g. "Set Gain and Mute State".',
-					default: 'Set Gain and Mute State',
+					default: '',
 				},
 				LAST_ACTION_SCOPE_OPTION,
 			],
@@ -346,7 +346,7 @@ export function getFeedbackDefinitions(
 					label: 'Action name (blank = any action)',
 					id: 'actionName',
 					tooltip: 'Matches the action name shown in the actions list, e.g. "Set Gain and Mute State".',
-					default: 'Set Gain and Mute State',
+					default: '',
 				},
 				LAST_ACTION_SCOPE_OPTION,
 			],
@@ -637,7 +637,7 @@ export function getFeedbackDefinitions(
 				if (!resolved) return {}
 				const read = getState().gainReads.get(gainKey(resolved.channelType, resolved.channelIndex))
 				const value = read ? (read.muted ? 'MUTED' : `${read.gainDb.toFixed(1)} dB`) : '--'
-				return { text: `GAIN ${resolved.label}\\n${value}` }
+				return { text: `GAIN ${resolved.label}\n${value}` }
 			},
 		},
 		channel_mute: {
@@ -690,16 +690,16 @@ export function getFeedbackDefinitions(
 				})
 				const read = getState().gainReads.get(gainKey(resolved.channelType, resolved.channelIndex))
 				if (!read) {
-					return { text: `TOGGLE MUTE\\n${resolved.label}\\n--` }
+					return { text: `TOGGLE MUTE\n${resolved.label}\n--` }
 				}
 				return read.muted
 					? {
-							text: `TOGGLE MUTE\\n${resolved.label}\\nMUTED`,
+							text: `TOGGLE MUTE\n${resolved.label}\nMUTED`,
 							bgcolor: UI.red,
 							color: UI.textPrimary,
 						}
 					: {
-							text: `TOGGLE MUTE\\n${resolved.label}\\nUNMUTED`,
+							text: `TOGGLE MUTE\n${resolved.label}\nUNMUTED`,
 							bgcolor: UI.green,
 							color: UI.textPrimary,
 						}

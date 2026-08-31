@@ -21,5 +21,4 @@ export const UI = {
 	/** Snapshot actions. */
 	indigo: combineRgb(75, 45, 150),
 	textPrimary: combineRgb(255, 255, 255),
-	textDim: combineRgb(150, 158, 170),
 } as const

@@ -23,6 +23,7 @@ Priority-source monitoring and rearming for inputs `1..16`:
 - **Monitor Input**: set one value, "Input (1-16)", in the feedback. The button shows `IN <n>` and turns green while the input's top-priority source is playing, orange when a backup source has taken over, grey when unknown.
 - **Rearm Input**: set the input number in the label feedback. The button shows `REARM IN <n>`; pressing it puts the input back on its top-priority source.
 - **Rearm All Inputs**: rearms all 16 inputs with one press.
+- **Read Priority List**: reads one input's priority source list from the device without changing anything. Useful in triggers or for diagnostics; the outcome appears in the `last_action_*` variables.
 
 Some firmware doesn't report the priority list; the monitor button then stays grey.
 
@@ -40,6 +41,8 @@ Set the channel type (Input DSP or Output DSP) and the channel number `1..16` in
 - **Channel Gain**: shows the channel's live gain, e.g. `GAIN IN 3 / -6.0 dB` (or `MUTED`).
 - **Channel Mute**: a mute key. Shows `TOGGLE MUTE / IN 3 / UNMUTED` (green) or `MUTED` (red); pressing it toggles the mute, keeping the current gain. One pair of options drives both the state and the press.
 - **Level Up / Level Down**: raise or lower the gain by a chosen dB amount (0.1-24 dB per press), keeping mute. Limited to `-80..+6 dB`.
+
+**Channel Mute (set/toggle)** sets, clears or toggles mute on an Input/Output DSP channel `1..16` without touching its gain, and needs no feedback on the button.
 
 **Set Gain and Mute State** is available when a fixed value is required. It supports all documented processing banks; Companion always displays one-based numbers and sends Newton the corresponding zero-based index.
 
@@ -83,7 +86,14 @@ The optional "Action name" filter of the Last Action feedbacks matches the actio
 
 - `$(outline-newton:connection_state)`: `Connected` or `Disconnected`.
 - `$(outline-newton:priority_input_1)`..`priority_input_16` and `priority_aux_input_1`..`priority_aux_input_8`: active source per priority patch, shown with 1-based source numbering (`N/A` when Newton reports no source).
-- `$(outline-newton:vu_input_1)`..`vu_input_16` and `vu_output_1`..`vu_output_16`: per-channel meter levels (1-based).
+- `$(outline-newton:vu_input_1)`..`vu_input_16` and `vu_output_1`..`vu_output_16`: per-channel **peak** meter levels in dB (1-based). RMS is only available through the Meter feedback's drawn image, not as a variable.
 - `$(outline-newton:snapshot_support)`: `OK`, `Unknown` or `Unsupported by firmware` (firmware < 0.98).
 - `$(outline-newton:vu_format)`: VU stream status. Reads `status-1024-peak-rms-db` while UDP meter packets are being decoded, otherwise the loss reason (`No VU packets` or `UDP error: …`).
-- `$(outline-newton:last_error)`, `last_priority_update`, `last_vu_update`: diagnostics. Large protocol replies are summarized rather than published in full.
+- `$(outline-newton:device_name)`, `firmware_version`, `serial_number`: device identity, re-read on every connection (`Unknown` until the device answers).
+- `$(outline-newton:snapshot_count)`, `last_applied_snapshot`, `last_snapshot_response`: snapshot database size and the outcome of the last snapshot operation.
+- `$(outline-newton:last_action_name)`, `last_action_status`, `last_action_response_hex`: the most recent action run from any button, its result (`success`/`error`/`unknown`) and the device reply.
+- `$(outline-newton:last_command)`, `last_response_hex`: the most recent protocol command, including background polling, and its reply.
+- `$(outline-newton:last_error)`: the last error message, cleared by the next successful command.
+- `$(outline-newton:last_priority_update)`, `last_vu_update`: timestamps of the last priority change and the last meter packet (`Never` until one arrives).
+
+The `*_response_hex` and `*_snapshot_response` variables summarize large protocol replies rather than publishing them in full.

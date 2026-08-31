@@ -41,7 +41,7 @@ export function getPresetDefinitions(): CompanionPresetDefinitions {
 		category: 'Input patch',
 		name: 'Monitor Input',
 		style: {
-			text: 'IN\\n#channel',
+			text: 'IN\n#channel',
 			size: '14',
 			color: combineRgb(255, 255, 255),
 			bgcolor: UI.bgNeutral,
@@ -62,7 +62,7 @@ export function getPresetDefinitions(): CompanionPresetDefinitions {
 		category: 'Input patch',
 		name: 'Rearm Input',
 		style: {
-			text: 'REARM\\n#channel',
+			text: 'REARM\n#channel',
 			size: '14',
 			color: combineRgb(255, 255, 255),
 			bgcolor: UI.blue,
@@ -109,7 +109,7 @@ export function getPresetDefinitions(): CompanionPresetDefinitions {
 		category: 'Clock',
 		name: 'Rearm Clock',
 		style: {
-			text: 'REARM\\nCLOCK',
+			text: 'REARM\nCLOCK',
 			size: '14',
 			color: combineRgb(255, 255, 255),
 			bgcolor: UI.blue,
@@ -137,7 +137,7 @@ export function getPresetDefinitions(): CompanionPresetDefinitions {
 		category: 'Levels & Mute',
 		name: 'Channel Gain',
 		style: {
-			text: 'GAIN\\n#channel',
+			text: 'GAIN\n#channel',
 			size: 'auto',
 			color: combineRgb(255, 255, 255),
 			bgcolor: UI.bgNeutral,
@@ -159,7 +159,7 @@ export function getPresetDefinitions(): CompanionPresetDefinitions {
 		category: 'Levels & Mute',
 		name: 'Level Up',
 		style: {
-			text: 'LEVEL\\n+',
+			text: 'LEVEL\n+',
 			size: '18',
 			color: combineRgb(255, 255, 255),
 			bgcolor: UI.bgPanel,
@@ -178,7 +178,7 @@ export function getPresetDefinitions(): CompanionPresetDefinitions {
 		category: 'Levels & Mute',
 		name: 'Level Down',
 		style: {
-			text: 'LEVEL\\n-',
+			text: 'LEVEL\n-',
 			size: '18',
 			color: combineRgb(255, 255, 255),
 			bgcolor: UI.bgPanel,
@@ -199,7 +199,7 @@ export function getPresetDefinitions(): CompanionPresetDefinitions {
 		category: 'Levels & Mute',
 		name: 'Channel Mute',
 		style: {
-			text: 'TOGGLE MUTE\\n#channel',
+			text: 'TOGGLE MUTE\n#channel',
 			size: 'auto',
 			color: combineRgb(255, 255, 255),
 			bgcolor: UI.bgNeutral,
@@ -227,7 +227,7 @@ export function getPresetDefinitions(): CompanionPresetDefinitions {
 		category: 'Snapshots',
 		name: 'Apply Snapshot',
 		style: {
-			text: 'APPLY\\n#snapshot',
+			text: 'APPLY\n#snapshot',
 			size: 'auto',
 			color: combineRgb(255, 255, 255),
 			bgcolor: UI.indigo,
@@ -275,7 +275,7 @@ export function getPresetDefinitions(): CompanionPresetDefinitions {
 		category: 'Input patch',
 		name: 'Rearm All Inputs',
 		style: {
-			text: 'REARM\\nALL',
+			text: 'REARM\nALL',
 			size: '14',
 			color: combineRgb(255, 255, 255),
 			bgcolor: UI.blue,

@@ -277,8 +277,5 @@ export function buildSnapshotApply(params: SnapshotApplyParams): Buffer {
 	if (params.mode !== undefined) {
 		payload.mode = params.mode
 	}
-	if (params.parts !== undefined) {
-		payload.part = params.parts
-	}
 	return buildSPC(SnapshotCmd.Apply, payload)
 }

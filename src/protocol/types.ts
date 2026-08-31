@@ -11,7 +11,6 @@ export interface SPRResponse {
 	command: number
 	success: boolean
 	payload: Record<string, unknown> | null
-	rawPayload: Buffer
 }
 
 export interface PriorityListState {
@@ -73,7 +72,6 @@ export interface SnapshotApplyParams {
 	uuid: string
 	fadingTime?: number
 	mode?: SnapshotApplyMode
-	parts?: string[]
 }
 
 /** Device state tracked by the module */
