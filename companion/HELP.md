@@ -94,6 +94,6 @@ The optional "Action name" filter of the Last Action feedbacks matches the actio
 - `$(outline-newton:last_action_name)`, `last_action_status`, `last_action_response_hex`: the most recent action run from any button, its result (`success`/`error`/`unknown`) and the device reply.
 - `$(outline-newton:last_command)`, `last_response_hex`: the most recent protocol command, including background polling, and its reply.
 - `$(outline-newton:last_error)`: the last error message, cleared by the next successful command.
-- `$(outline-newton:last_priority_update)`, `last_vu_update`: timestamps of the last priority change and the last meter packet (`Never` until one arrives).
+- `$(outline-newton:last_priority_update)`, `last_vu_update`: timestamps of the last priority change and of the last meter packet in the current stream (`Never` until one arrives, and again whenever the UDP stream is lost).
 
-The `*_response_hex` and `*_snapshot_response` variables summarize large protocol replies rather than publishing them in full.
+The `*_response_hex`, `last_snapshot_response` and `last_applied_snapshot` variables summarize large protocol replies rather than publishing them in full.

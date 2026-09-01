@@ -267,7 +267,7 @@ export function buildSnapshotGetDatabase(): Buffer {
 
 /**
  * Build a Snapshot Apply command.
- * Applies a snapshot with optional fading time, mode, and partial recall.
+ * Applies a snapshot with optional fading time and transition mode.
  */
 export function buildSnapshotApply(params: SnapshotApplyParams): Buffer {
 	const payload: Record<string, unknown> = { uuid: params.uuid }
