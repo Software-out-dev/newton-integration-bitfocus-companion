@@ -5,7 +5,6 @@ import { getActionDefinitions } from './actions.js'
 import { bindActionClient } from './action-client.js'
 import { getFeedbackDefinitions, gainKey } from './feedbacks.js'
 import { buildDeviceVariables, buildVuVariables, getVariableDefinitions } from './variables.js'
-import { getPresetDefinitions } from './presets.js'
 import { CLOCK_FEEDBACK_IDS, NewtonSession, PRIORITY_FEEDBACK_IDS } from './newton-session.js'
 import type { GainReadState, NewtonActionResult } from './protocol/types.js'
 
@@ -186,7 +185,6 @@ export class NewtonInstance extends InstanceBase<ModuleConfig> {
 			),
 		)
 		this.setVariableDefinitions(getVariableDefinitions())
-		this.setPresetDefinitions(getPresetDefinitions())
 
 		this.updateVariables()
 		this.updateVuVariables()

@@ -11,7 +11,7 @@
 - **Metering**: full-height LED-style VU meter buttons (Peak/RMS, per channel), queried over UDP and also exposed as variables
 - **Status**: connection state, action-result feedbacks and diagnostics variables for triggers
 
-See [companion/HELP.md](companion/HELP.md) (shown as the connection help inside Companion) for the full list of actions, feedbacks, presets and variables.
+See [companion/HELP.md](companion/HELP.md) (shown as the connection help inside Companion) for the full list of actions, feedbacks and variables.
 
 ## Configuration
 
