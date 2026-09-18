@@ -69,7 +69,7 @@ Gain/mute actions accept at most 32 active or waiting operations per connection.
 
 **Apply Snapshot (by name)**: choose the snapshot directly in the action options, together with fading time and transition mode. The list is read from the device when the module connects. The **Apply Snapshot** button preset already contains this action; its preview shows `APPLY / SNAP / SHOT` on three lines. After adding it to a page, select a snapshot in the action and the label automatically becomes `APPLY` followed by the snapshot name. No second selection is required in the feedback. For buttons created with an older module, add **Snapshot - Automatic Action Label** or drag in the updated preset. If one button contains different snapshot selections, its label shows `APPLY / MULTIPLE`. The same action also works in triggers. Run **Refresh Snapshot Database** after snapshots are added, renamed or removed outside Companion.
 
-The **fading time** must be `0` (apply instantly) or between `2000` and `65535` ms: Newton does not support fades of 1-1999 ms, and the module rejects such values with a log message instead of sending them.
+The **fading time** must be `0` (apply instantly) or between `2000` and `65535` ms. Outline's own control software enforces the same 2000 ms minimum, so the module rejects fades of 1-1999 ms with a log message instead of sending them.
 
 Snapshots require Newton **firmware 0.98 or later**. The module reads the firmware version when it connects: on older firmware (e.g. 0.97) the snapshot actions are disabled with a clear log message, the snapshot button label shows `NO SNAPSHOT / FW < 0.98`, and `$(outline-newton:snapshot_support)` reads `Unsupported by firmware`. Every other feature keeps working.
 

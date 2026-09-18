@@ -532,7 +532,8 @@ export function getActionDefinitions(
 					type: 'number',
 					label: 'Fading Time (ms)',
 					id: 'fadingTime',
-					tooltip: '0 applies the snapshot instantly. Any fade must be 2000-65535 ms; Newton rejects 1-1999 ms.',
+					tooltip:
+						"0 applies the snapshot instantly. Any fade must be 2000-65535 ms; the module rejects 1-1999 ms, matching the minimum enforced by Outline's own control software.",
 					default: 2000,
 					min: 0,
 					max: 65535,
@@ -761,17 +762,26 @@ export function getActionDefinitions(
 				}
 				const channelIndex = channel - 1
 				const signed = direction === 'down' ? -deltaDb : deltaDb
-				await mutateFreshGain(name, channelType, channelIndex, action.controlId, async (current, operationClient) => {
-					const gainDb = clampGainDb(current.gainDb + signed)
-					const written = await buildAndRunCommand(
-						operationClient,
-						logger,
-						name,
-						() => buildGainCommand({ channelType, channelIndex, gainDb, mute: current.muted }),
-						action.controlId,
-					)
-					if (written) logger.reportGainRead?.(channelType, channelIndex, { gainDb, muted: current.muted })
-				})
+				await mutateFreshGain(
+					name,
+					channelType,
+					channelIndex,
+					action.controlId,
+					async (current, operationClient, operationLogger) => {
+						const gainDb = clampGainDb(current.gainDb + signed)
+						// Report through the operation-scoped logger, like the other gain
+						// mutations: once the queue cancels this press, its late outcome
+						// must neither duplicate the failure nor republish gain state.
+						const written = await buildAndRunCommand(
+							operationClient,
+							operationLogger,
+							name,
+							() => buildGainCommand({ channelType, channelIndex, gainDb, mute: current.muted }),
+							action.controlId,
+						)
+						if (written) operationLogger.reportGainRead?.(channelType, channelIndex, { gainDb, muted: current.muted })
+					},
+				)
 			},
 		},
 

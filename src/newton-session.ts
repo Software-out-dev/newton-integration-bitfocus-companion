@@ -213,18 +213,21 @@ export class NewtonSession {
 			)
 			this.companion.log('info', `Connected to Newton at ${this.config.host}:${SETTINGS.port}`)
 
-			void this.pollDeviceState()
+			// Arm each scheduler before its first cycle: (re)starting a scheduler
+			// also clears its single-flight flag, which must not happen while that
+			// first cycle is already in flight.
 			this.startPolling()
+			void this.pollDeviceState()
 			// Check whether this firmware has snapshots, then populate the
 			// snapshot-by-name dropdown.
 			void this.initSnapshotSupport()
 			// Firmware 0.98 rejects Get Gain (0x01); the documented live state
 			// available on this hardware is the full preset-audio import (0x21).
-			void this.pollPresetAudio()
 			this.startPresetAudioPolling()
+			void this.pollPresetAudio()
 
-			void this.pollPriorityMetadata()
 			this.startPriorityPolling()
+			void this.pollPriorityMetadata()
 			if (!this.vuListener) this.startVuListener()
 		})
 
