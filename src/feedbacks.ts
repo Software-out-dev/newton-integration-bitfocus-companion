@@ -7,7 +7,7 @@ import {
 	MIN_SNAPSHOT_FIRMWARE,
 	PRIORITY_SOURCE_NONE,
 } from './protocol/constants.js'
-import { findSnapshot, snapshotPlaceholderLabel } from './snapshots.js'
+import { findSnapshot, snapshotPlaceholderLabel, SnapshotActionSelections } from './snapshots.js'
 import { UI } from './style.js'
 import type { NewtonState, SnapshotInfo } from './protocol/types.js'
 
@@ -224,9 +224,6 @@ export function getFeedbackDefinitions(
 	// controlId -> clock type written by the clock rearm label feedback; the
 	// 'rearm_this_clock' action reads it so one option drives the whole button.
 	clockRearmTargets: Map<string, number> = new Map(),
-	// controlId -> snapshot uuid written by the snapshot label feedback; the
-	// 'apply_this_snapshot' action reads it so one selection drives the button.
-	snapshotTargets: Map<string, string> = new Map(),
 	// Snapshot database entries for the by-name dropdown; definitions are
 	// re-registered when the device list changes.
 	snapshotList: SnapshotInfo[] = [],
@@ -236,6 +233,7 @@ export function getFeedbackDefinitions(
 	// Number of per-button action-result feedbacks on each control. Success and
 	// Error are commonly paired, so cleanup must wait for the last sibling.
 	lastActionFeedbackRefs: Map<string, number> = new Map(),
+	snapshotActionSelections = new SnapshotActionSelections(),
 ): CompanionFeedbackDefinitions {
 	const snapshotChoices = [
 		{
@@ -555,11 +553,28 @@ export function getFeedbackDefinitions(
 				return { text: `REARM\n${CLOCK_TYPE_LABELS[clockType]}` }
 			},
 		},
+		snapshot_action_label: {
+			type: 'advanced',
+			name: 'Snapshot - Automatic Action Label',
+			description:
+				'Shows the snapshot selected in the Apply Snapshot (by name) action on this button. Updates automatically when the action selection changes.',
+			options: [],
+			callback: (feedback) => {
+				const state = getState()
+				if (state.snapshotsUnsupported) return { text: `NO SNAPSHOT\nFW < ${MIN_SNAPSHOT_FIRMWARE}` }
+				const uuid = snapshotActionSelections.getUuid(feedback.controlId)
+				if (uuid === null) return { text: 'APPLY\nMULTIPLE' }
+				if (!uuid) return { text: 'APPLY\nSNAP\nSHOT' }
+				if (!state.snapshotDatabaseLoaded) return { text: 'SNAPSHOT\nLOADING…' }
+				const snapshot = findSnapshot(state.snapshotList, uuid)
+				return { text: snapshot ? `APPLY\n${snapshot.name}` : 'SNAPSHOT\nMISSING' }
+			},
+		},
 		snapshot_apply_label: {
 			type: 'advanced',
-			name: 'Snapshot - Apply Button Label',
+			name: 'Snapshot - Name Label',
 			description:
-				'One snapshot selection drives the button: shows the snapshot name and tells the Apply This Button Snapshot action which snapshot to apply.',
+				'Displays the selected snapshot name and availability. This feedback only changes the label; select the snapshot to recall in the Apply Snapshot (by name) action.',
 			options: [
 				{
 					type: 'dropdown',
@@ -569,35 +584,23 @@ export function getFeedbackDefinitions(
 					choices: snapshotChoices,
 				},
 			],
-			subscribe: (feedback) => {
-				const uuid = String(feedback.options['uuid'] ?? '').trim()
-				if (uuid) snapshotTargets.set(feedback.controlId, uuid)
-			},
-			unsubscribe: (feedback) => {
-				snapshotTargets.delete(feedback.controlId)
-			},
 			callback: (feedback) => {
 				// Old firmware (< 0.98) has no snapshots: say so on the button
 				// instead of showing a snapshot name that can never be applied.
 				if (getState().snapshotsUnsupported) {
-					snapshotTargets.delete(feedback.controlId)
 					return { text: `NO SNAPSHOT\nFW < ${MIN_SNAPSHOT_FIRMWARE}` }
 				}
 				const uuid = String(feedback.options['uuid'] ?? '').trim()
 				if (!uuid) {
-					snapshotTargets.delete(feedback.controlId)
 					return { text: 'APPLY\n#snapshot' }
 				}
 				if (!getState().snapshotDatabaseLoaded) {
-					snapshotTargets.set(feedback.controlId, uuid)
 					return { text: 'SNAPSHOT\nLOADING…' }
 				}
 				const snapshot = findSnapshot(snapshotList, uuid)
 				if (!snapshot) {
-					snapshotTargets.delete(feedback.controlId)
 					return { text: 'SNAPSHOT\nMISSING' }
 				}
-				snapshotTargets.set(feedback.controlId, uuid)
 				return { text: `APPLY\n${snapshot.name}` }
 			},
 		},
@@ -605,7 +608,7 @@ export function getFeedbackDefinitions(
 			type: 'advanced',
 			name: 'Levels - Channel Gain',
 			description:
-				'Shows a channel\'s live gain on the button, e.g. "GAIN IN 3 / -6.0 dB". Refreshes from the complete 0x21 audio-preset payload while the feedback is in use; its cadence follows the Gain/Mute refresh interval setting.',
+				'Shows a channel\'s live gain on the button, e.g. "GAIN IN 3 / -6.0 dB". Refreshes from the complete audio preset read while the feedback is in use; its cadence follows the Gain/Mute refresh interval setting.',
 			options: [
 				{
 					type: 'dropdown',
@@ -644,7 +647,7 @@ export function getFeedbackDefinitions(
 			type: 'advanced',
 			name: 'Levels - Channel Mute',
 			description:
-				"Shows a channel's mute state (red muted, green open) and tells the Mute This Button Channel action which channel to toggle. Refreshes from the complete 0x21 audio-preset payload while the feedback is in use; its cadence follows the Gain/Mute refresh interval setting.",
+				"Shows a channel's mute state (red muted, green open) and tells the Mute This Button Channel action which channel to toggle. Refreshes from the complete audio preset read while the feedback is in use; its cadence follows the Gain/Mute refresh interval setting.",
 			options: [
 				{
 					type: 'dropdown',

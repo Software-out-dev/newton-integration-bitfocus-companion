@@ -10,8 +10,8 @@ export interface ModuleConfig {
 // UDP 0x2B meter/status query interval. The ceiling stays at 1000 ms: the VU
 // listener declares the stream lost after 3000 ms, so a slower cadence would
 // let a single dropped reply produce a false expiry before the next query.
-export const METER_POLL_INTERVAL_DEFAULT = 100
-export const METER_POLL_INTERVAL_MIN = 80
+export const METER_POLL_INTERVAL_DEFAULT = 80
+export const METER_POLL_INTERVAL_MIN = 50
 export const METER_POLL_INTERVAL_MAX = 1000
 
 // TCP 0x21 full audio-preset reread interval (~384 KiB per response) that
@@ -53,7 +53,7 @@ export function normalizeConfig(config: Partial<ModuleConfig> | undefined | null
 function normalizeIntervalMs(value: unknown, fallback: number, min: number, max: number): number {
 	const num =
 		typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN
-	if (!Number.isFinite(num)) return fallback
+	if (!Number.isFinite(num) || num <= 0) return fallback
 	return Math.min(max, Math.max(min, Math.round(num)))
 }
 
@@ -91,7 +91,7 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 			id: 'meter_poll_interval',
 			label: 'Meter/status polling interval (ms)',
 			tooltip:
-				'How often to query VU meters, priority and clock status over UDP 6667. 100 ms = 10 queries/s. Lower = smoother meters, more network traffic.',
+				'Interval between VU meter, priority and clock status updates. Default 80 ms; minimum 50 ms. Lower = smoother meters, more network traffic.',
 			width: 6,
 			default: METER_POLL_INTERVAL_DEFAULT,
 			min: METER_POLL_INTERVAL_MIN,
@@ -102,7 +102,7 @@ export function getConfigFields(): SomeCompanionConfigField[] {
 			id: 'gain_mute_poll_interval',
 			label: 'Gain/Mute refresh interval (ms)',
 			tooltip:
-				'How often to reread gain/mute state with the full TCP 0x21 preset (~384 KiB). 1500 ms = one read every 1.5 s. Only active while gain/mute feedbacks are in use.',
+				'Preset read interval for refreshing gain/mute state. Default 1500 ms = one read every 1.5 s. Only active while gain/mute feedbacks are in use.',
 			width: 6,
 			default: GAIN_MUTE_POLL_INTERVAL_DEFAULT,
 			min: GAIN_MUTE_POLL_INTERVAL_MIN,

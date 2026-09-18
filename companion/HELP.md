@@ -5,16 +5,20 @@ Control the Outline Newton audio signal matrix and hub from Bitfocus Companion.
 ## Configuration
 
 - **Device IP Address**: the Newton's IP address.
-- **Meter/status polling interval (ms)**: how often Companion queries the VU meters and the live priority-patch/clock status over UDP `6667`. Default `100` ms = 10 queries per second; allowed range `80..1000` ms. Lower values give smoother meters and faster status monitors at the cost of more network traffic. Applying a new value recreates the UDP meter socket immediately; the TCP session is not touched.
-- **Gain/Mute refresh interval (ms)**: how often the gain/mute state is re-read from the full audio-preset payload (`0x21`, ~384 KiB per response) over TCP. Default `1500` ms = one read every 1.5 s (~256 KiB/s of payload while active); allowed range `1000..5000` ms. Periodic refresh runs only while at least one gain/mute feedback is in use, so buttons without Levels & Mute feedbacks cause no background `0x21` polling.
+- **Meter/status polling interval (ms)**: how often Companion queries the VU meters and the live priority-patch/clock status over UDP `6667`. Default `80` ms = 12.5 queries per second; allowed range `50..1000` ms. Lower values give smoother meters and faster status monitors at the cost of more network traffic. Applying a new value recreates the UDP meter socket immediately; the TCP session is not touched.
+- **Gain/Mute refresh interval (ms)**: how often to read the complete audio preset to refresh gain/mute state (~384 KiB per response over TCP). Default `1500` ms = one read every 1.5 s (~256 KiB/s of payload while active); allowed range `1000..5000` ms. Periodic refresh runs only while at least one gain/mute feedback is in use, so buttons without Levels & Mute feedbacks cause no background preset reads.
 
-Out-of-range or invalid interval values are clamped back to these ranges at runtime; saving a config that changes only the intervals never restarts the TCP session.
+Missing, zero or invalid intervals are restored to the defaults and saved back to the connection settings. Other out-of-range values are clamped to the allowed ranges; saving a config that changes only the intervals never restarts the TCP session.
 
 Companion sends commands, configuration reads and snapshot traffic to Newton over TCP port `6668`. Real-time meter/status requests use UDP port `6667`; the operating system automatically chooses Companion's local UDP reply port.
 
 All channel and input numbers shown in Companion are 1-based. The module converts them internally to Newton's 0-based protocol indices before sending a command.
 
 The UDP stream also carries the live priority-patch and clock status. If UDP `6667` is blocked between Companion and the Newton, control over TCP keeps working, but meters and the priority/clock monitors stay `N/A` and the module logs a warning — check the network path in that case.
+
+## Button presets
+
+Ready-to-use button templates are available under **Presets → Newton**, grouped into Status, Input patch, Clock, Levels & Mute, Snapshots and Metering. Drag them onto a page, then choose the input/channel in the feedback or action options. For snapshots, choose the snapshot directly in the action.
 
 ## Input patch
 
@@ -57,11 +61,13 @@ Set the channel type (Input DSP or Output DSP) and the channel number `1..16` in
 
 Every gain the module writes is hard-clamped to the device-safe `-80..+6 dB` window: values outside this range never reach the device.
 
-Gain and mute feedbacks refresh from the complete Newton audio-preset payload (`0x21`) while at least one Levels & Mute feedback is in use. The **Gain/Mute refresh interval** setting controls this background cadence, so changes made elsewhere (another controller, the front panel, a snapshot recall) appear automatically. Before a relative gain or mute write, Companion reads the current device state and serializes same-channel presses, so it does not reuse stale gain/mute values. Values show `--` until first read or while disconnected.
+Gain and mute feedbacks refresh by reading the complete Newton audio preset while at least one Levels & Mute feedback is in use. The **Gain/Mute refresh interval** setting controls this background cadence, so changes made elsewhere (another controller, the front panel, a snapshot recall) appear automatically. Before a relative gain or mute write, Companion reads the current device state and serializes same-channel presses, so it does not reuse stale gain/mute values. Values show `--` until first read or while disconnected.
+
+Gain/mute actions accept at most 32 active or waiting operations per connection. Each request has a 16-second deadline for sending its commands, including time waiting behind other operations and time spent reading the current state. Excess or expired requests report an action error instead of changing the device later. A command already sent keeps its normal response timeout. Disconnecting or changing the target cancels waiting requests and prevents unfinished reads from sending a later write; new requests must be made after reconnection.
 
 ## Snapshots
 
-**Apply Snapshot**: pick the snapshot by name in the label feedback; the button shows the snapshot name and pressing it applies it, with the fading time and transition mode set in the action options. The name list is read from the device when the module connects. A dropdown action, "Snapshot Apply (by name)", is also available for triggers. Run **Refresh Snapshot Database** after snapshots are added, renamed or removed outside Companion.
+**Apply Snapshot (by name)**: choose the snapshot directly in the action options, together with fading time and transition mode. The list is read from the device when the module connects. The **Apply Snapshot** button preset already contains this action; its preview shows `APPLY / SNAP / SHOT` on three lines. After adding it to a page, select a snapshot in the action and the label automatically becomes `APPLY` followed by the snapshot name. No second selection is required in the feedback. For buttons created with an older module, add **Snapshot - Automatic Action Label** or drag in the updated preset. If one button contains different snapshot selections, its label shows `APPLY / MULTIPLE`. The same action also works in triggers. Run **Refresh Snapshot Database** after snapshots are added, renamed or removed outside Companion.
 
 The **fading time** must be `0` (apply instantly) or between `2000` and `65535` ms: Newton does not support fades of 1-1999 ms, and the module rejects such values with a log message instead of sending them.
 
@@ -80,7 +86,7 @@ Per-channel values are also published as `$(outline-newton:vu_input_1)`..`vu_inp
 - **Connection Status**: shows `NEWTON ONLINE` (green) or `OFFLINE` (red).
 - Boolean **Device Connected** and **Last Action Success/Error** feedbacks are available for triggers.
 
-The optional "Action name" filter of the Last Action feedbacks matches the action name exactly as shown in the actions list (for example `Set Gain and Mute State`, `Snapshot Apply (by name)`, `Rearm Priority Patch`, `Level Up / Down`); leave it blank to match any action.
+The optional "Action name" filter of the Last Action feedbacks matches the action name exactly as shown in the actions list (for example `Set Gain and Mute State`, `Apply Snapshot (by name)`, `Rearm Priority Patch`, `Level Up / Down`); leave it blank to match any action.
 
 ## Variables
 

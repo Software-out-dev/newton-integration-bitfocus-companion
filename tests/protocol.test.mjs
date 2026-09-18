@@ -170,16 +170,7 @@ test('last-action cleanup waits for the final paired feedback on a control', () 
 		]),
 	}
 	const refs = new Map()
-	const definitions = getFeedbackDefinitions(
-		() => state,
-		new Map(),
-		new Map(),
-		new Map(),
-		new Map(),
-		[],
-		new Map(),
-		refs,
-	)
+	const definitions = getFeedbackDefinitions(() => state, new Map(), new Map(), new Map(), [], new Map(), refs)
 	const successFeedback = { controlId: 'button-1', options: { actionName: 'Set Gain', scope: 'this' } }
 	const errorFeedback = { controlId: 'button-1', options: { actionName: 'Set Gain', scope: 'this' } }
 	definitions.last_action_success.subscribe(successFeedback)
@@ -276,7 +267,6 @@ test('restored snapshot database action sends Get Database and reports its contr
 		new Map(),
 		[],
 		new Map(),
-		new Map(),
 		() => false,
 		() => true,
 	)
@@ -323,8 +313,8 @@ test('config exposes explicit polling interval fields with safe defaults', () =>
 
 	const meter = fields.find((entry) => entry.id === 'meter_poll_interval')
 	assert.equal(meter.type, 'number')
-	assert.equal(meter.default, 100)
-	assert.equal(meter.min, 80)
+	assert.equal(meter.default, 80)
+	assert.equal(meter.min, 50)
 	assert.equal(meter.max, 1000)
 
 	const gainMute = fields.find((entry) => entry.id === 'gain_mute_poll_interval')
@@ -341,26 +331,26 @@ test('config exposes explicit polling interval fields with safe defaults', () =>
 test('config normalization rounds, clamps and falls back to safe polling intervals', () => {
 	assert.deepEqual(normalizeConfig(undefined), DEFAULT_CONFIG)
 	assert.deepEqual(normalizeConfig(null), DEFAULT_CONFIG)
-	assert.deepEqual(normalizeConfig({}), { host: '', meter_poll_interval: 100, gain_mute_poll_interval: 1500 })
+	assert.deepEqual(normalizeConfig({}), { host: '', meter_poll_interval: 80, gain_mute_poll_interval: 1500 })
 
 	// Hand-edited or imported configs: non-numeric and non-finite values fall
 	// back to the defaults instead of reaching a setInterval call.
 	assert.deepEqual(
 		normalizeConfig({ host: '10.0.0.5', meter_poll_interval: Number.NaN, gain_mute_poll_interval: 'fast' }),
-		{ host: '10.0.0.5', meter_poll_interval: 100, gain_mute_poll_interval: 1500 },
+		{ host: '10.0.0.5', meter_poll_interval: 80, gain_mute_poll_interval: 1500 },
 	)
 	assert.equal(normalizeConfig({ gain_mute_poll_interval: Infinity }).gain_mute_poll_interval, 1500)
 	// A config saved by the removed interactivity dropdown normalizes safely.
 	assert.deepEqual(normalizeConfig({ host: '10.0.0.5', interactivity: 'high' }), {
 		host: '10.0.0.5',
-		meter_poll_interval: 100,
+		meter_poll_interval: 80,
 		gain_mute_poll_interval: 1500,
 	})
 
 	// Out-of-range values clamp to the declared bounds; fractions and numeric
 	// strings become whole milliseconds.
 	const clamped = normalizeConfig({ host: 'newton.local', meter_poll_interval: 5, gain_mute_poll_interval: 99999 })
-	assert.equal(clamped.meter_poll_interval, 80)
+	assert.equal(clamped.meter_poll_interval, 50)
 	assert.equal(clamped.gain_mute_poll_interval, 5000)
 	assert.equal(normalizeConfig({ meter_poll_interval: 123.4 }).meter_poll_interval, 123)
 	assert.equal(normalizeConfig({ meter_poll_interval: '250' }).meter_poll_interval, 250)
@@ -1206,7 +1196,6 @@ test('snapshot apply by name uses the device list for the dropdown and applies b
 		new Map(),
 		snapshotList,
 		new Map(),
-		new Map(),
 		() => false,
 		() => true,
 	)
@@ -1244,84 +1233,36 @@ test('snapshot apply by name uses the device list for the dropdown and applies b
 	assert.deepEqual(sent, [])
 })
 
-test('snapshot label feedback writes the name and feeds the apply action', async () => {
-	const snapshotList = [{ uuid: '00000034-40c8-6d88-8c0b-59899f12d260', name: 'Show opening' }]
-	const snapshotTargets = new Map()
+test('snapshot label feedback displays the name without controlling the apply action', () => {
+	const snapshotList = [{ uuid: 'uuid-1', name: 'Show opening' }]
 	const label = getFeedbackDefinitions(
 		() => ({ snapshotDatabaseLoaded: true }),
 		new Map(),
 		new Map(),
 		new Map(),
-		snapshotTargets,
 		snapshotList,
 	).snapshot_apply_label
-
-	// The dropdown lists the device snapshots by name.
-	assert.deepEqual(label.options[0].choices.map((c) => c.id).slice(1), [snapshotList[0].uuid])
-
-	// Selecting writes the snapshot name on the button and registers the target.
-	assert.deepEqual(label.callback({ controlId: 's1', options: { uuid: snapshotList[0].uuid } }), {
-		text: 'APPLY\nShow opening',
-	})
-	assert.equal(snapshotTargets.get('s1'), snapshotList[0].uuid)
-
-	// No selection → placeholder text, no target.
+	assert.deepEqual(label.callback({ controlId: 's1', options: { uuid: 'uuid-1' } }), { text: 'APPLY\nShow opening' })
 	assert.deepEqual(label.callback({ controlId: 's2', options: { uuid: '' } }), { text: 'APPLY\n#snapshot' })
-	assert.equal(snapshotTargets.has('s2'), false)
-
-	const sent = []
-	const client = {
-		sendCommandExpect: async (cmd) => {
-			sent.push(Buffer.from(cmd))
-			return { success: true, rx: Buffer.alloc(0) }
-		},
-	}
-	const logger = { log: () => undefined, reportActionResult: () => undefined }
-	const actions = getActionDefinitions(
-		client,
-		logger,
-		new Map(),
-		new Map(),
-		snapshotList,
-		snapshotTargets,
-		new Map(),
-		() => false,
-		() => true,
-	)
-
-	await actions.apply_this_snapshot.callback({ controlId: 's1', options: { fadingTime: 0, mode: 'ThroughZero' } })
-	assert.equal(sent.length, 1)
-	const payload = JSON.parse(sent[0].subarray(6, sent[0].length - 2).toString('utf-8'))
-	assert.deepEqual(payload, { uuid: snapshotList[0].uuid, fading_time: 0, mode: 'ThroughZero' })
-
-	// A button without the label feedback sends nothing.
-	sent.length = 0
-	await actions.apply_this_snapshot.callback({ controlId: 's-unknown', options: { fadingTime: 0, mode: 'Direct' } })
-	assert.deepEqual(sent, [])
-
-	// The feedback-bound variant validates its runtime mode too.
-	await actions.apply_this_snapshot.callback({ controlId: 's1', options: { fadingTime: 0, mode: 'invalid-mode' } })
-	assert.deepEqual(sent, [])
+	const actions = getActionDefinitions(null, { log() {} })
+	assert.equal(actions.apply_this_snapshot, undefined)
+	assert.equal(actions.snapshot_apply_selected.name, 'Apply Snapshot (by name)')
 })
 
-test('a deleted snapshot clears its button target and cannot be applied', async () => {
-	const snapshotTargets = new Map([['stale-button', 'deleted-uuid']])
+test('a deleted snapshot is labelled missing and cannot be applied', async () => {
 	const label = getFeedbackDefinitions(
 		() => ({ snapshotDatabaseLoaded: true }),
 		new Map(),
 		new Map(),
 		new Map(),
-		snapshotTargets,
 		[],
 	).snapshot_apply_label
 	assert.deepEqual(label.callback({ controlId: 'stale-button', options: { uuid: 'deleted-uuid' } }), {
 		text: 'SNAPSHOT\nMISSING',
 	})
-	assert.equal(snapshotTargets.has('stale-button'), false)
 
 	// Defend at action time too, in case the device list changed after the
 	// feedback last rendered.
-	snapshotTargets.set('stale-button', 'deleted-uuid')
 	const sent = []
 	const reports = []
 	const actions = getActionDefinitions(
@@ -1335,17 +1276,15 @@ test('a deleted snapshot clears its button target and cannot be applied', async 
 		new Map(),
 		new Map(),
 		[],
-		snapshotTargets,
 		new Map(),
 		() => false,
 		() => true,
 	)
-	await actions.apply_this_snapshot.callback({
+	await actions.snapshot_apply_selected.callback({
 		controlId: 'stale-button',
-		options: { fadingTime: 2000, mode: 'Direct' },
+		options: { uuid: 'deleted-uuid', fadingTime: 2000, mode: 'Direct' },
 	})
 	assert.deepEqual(sent, [])
-	assert.equal(snapshotTargets.has('stale-button'), false)
 	assert.match(reports.at(-1).error, /no longer exists/)
 })
 
@@ -1353,7 +1292,7 @@ test('channel gain/mute feedbacks subscribe channels and render device reads', (
 	const state = { gainReads: new Map() }
 	const gainSubs = new Map()
 	const muteTargets = new Map()
-	const defs = getFeedbackDefinitions(() => state, new Map(), gainSubs, new Map(), new Map(), [], muteTargets)
+	const defs = getFeedbackDefinitions(() => state, new Map(), gainSubs, new Map(), [], muteTargets)
 
 	// Subscribing an Output DSP channel 5 registers protocol channel 4.
 	defs.channel_gain.subscribe({ id: 'g1', options: { channelType: 1, channel: 5 } })
@@ -1412,7 +1351,7 @@ test('mute actions fetch fresh 0x21 state and preserve gain without a gain feedb
 	}
 	const muteTargets = new Map([['ctrl9', { channelType: 1, channelIndex: 4 }]])
 	// No Gain/Mute feedback is registered and no cache is supplied.
-	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], new Map(), muteTargets)
+	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], muteTargets)
 
 	await actions.mute_this_channel.callback({ controlId: 'ctrl9', options: { mode: 'toggle' } })
 	assert.deepEqual(
@@ -1498,7 +1437,7 @@ test('failed gain and mute writes keep the freshly-read device state', async () 
 		reportGainRead: (_type, _index, read) => reads.push(read),
 	}
 	const muteTargets = new Map([['ctrl9', { channelType: 1, channelIndex: 4 }]])
-	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], new Map(), muteTargets)
+	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], muteTargets)
 	await actions.mute_this_channel.callback({ controlId: 'ctrl9', options: { mode: 'toggle' } })
 	await actions.adjust_gain.callback({
 		options: { channelType: 1, channel: 5, direction: 'up', deltaDb: 1 },
@@ -1692,7 +1631,7 @@ test('level up/down reads fresh 0x21 state and writes it back', async () => {
 		reportActionResult: () => undefined,
 		reportGainRead: (_type, _index, state) => reads.push(state),
 	}
-	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], new Map(), new Map())
+	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], new Map())
 
 	await actions.adjust_gain.callback({
 		options: { channelType: ChannelType.OutputDsp, channel: 3, direction: 'up', deltaDb: 2.5 },
@@ -1745,7 +1684,7 @@ test('concurrent level presses are serialized per channel around fresh read-modi
 			return { success: true, rx: Buffer.from('3300', 'hex') }
 		},
 	}
-	const actions = getActionDefinitions(client, { log: () => undefined }, new Map(), new Map(), [], new Map(), new Map())
+	const actions = getActionDefinitions(client, { log: () => undefined }, new Map(), new Map(), [], new Map())
 	const press = () =>
 		actions.adjust_gain.callback({
 			options: { channelType: ChannelType.InputDsp, channel: 1, direction: 'up', deltaDb: 1 },
@@ -1901,14 +1840,12 @@ test('snapshot actions fail fast on pre-0.98 firmware without sending', async ()
 	}
 	const results = []
 	const logger = { log: () => undefined, reportActionResult: (r) => results.push(r) }
-	const snapshotTargets = new Map([['control-1', 'uuid-1']])
 	const actions = getActionDefinitions(
 		client,
 		logger,
 		new Map(),
 		new Map(),
 		[{ uuid: 'uuid-1', name: 'Cached snapshot' }],
-		snapshotTargets,
 		new Map(),
 		() => true,
 	)
@@ -1920,10 +1857,7 @@ test('snapshot actions fail fast on pre-0.98 firmware without sending', async ()
 	await actions.snapshot_apply_selected.callback({
 		options: { uuid: 'uuid-1', fadingTime: 2000, mode: 'Direct' },
 	})
-	await actions.apply_this_snapshot.callback({
-		controlId: 'control-1',
-		options: { fadingTime: 2000, mode: 'Direct' },
-	})
+	await actions.snapshot_get_database.callback({ controlId: 'control-1', options: {} })
 	assert.deepEqual(sent, [])
 	assert.equal(results.length, 2)
 	assert.ok(results.every((r) => r.success === false && /firmware 0\.98/.test(r.error)))
@@ -1932,7 +1866,6 @@ test('snapshot actions fail fast on pre-0.98 firmware without sending', async ()
 test('snapshot label feedback reports missing firmware support', () => {
 	const label = getFeedbackDefinitions(
 		() => ({ snapshotsUnsupported: true }),
-		new Map(),
 		new Map(),
 		new Map(),
 		new Map(),
@@ -1973,7 +1906,7 @@ test('every gain write is clamped to the device-safe -80..+6 dB window', async (
 		reportGainRead: (t, i, s) => reads.push(s),
 	}
 	const muteTargets = new Map([['ctrl9', { channelType: 1, channelIndex: 4 }]])
-	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], new Map(), muteTargets)
+	const actions = getActionDefinitions(client, logger, new Map(), new Map(), [], muteTargets)
 	const setGainChannelOption = actions.set_gain.options.find((option) => option.id === 'channelIndex')
 	assert.deepEqual(
 		{
@@ -2132,24 +2065,20 @@ test('scope option restores module-wide status lamps', () => {
 	)
 })
 
-test('snapshot label shows a loading state and keeps its target until the database is read', () => {
-	const snapshotTargets = new Map()
+test('snapshot label and apply action wait until the database is read', () => {
 	const cachedSnapshots = [{ uuid: 'uuid-1', name: 'Cached name' }]
 	const label = getFeedbackDefinitions(
 		() => ({ snapshotDatabaseLoaded: false }),
 		new Map(),
 		new Map(),
 		new Map(),
-		snapshotTargets,
 		cachedSnapshots,
 	).snapshot_apply_label
 
-	// Valid uuid, database not read yet: not "missing", and the target stays
-	// registered so pressing the button right after connect can still work.
+	// A saved UUID is loading rather than missing until the database arrives.
 	assert.deepEqual(label.callback({ controlId: 'b1', options: { uuid: 'uuid-1' } }), {
 		text: 'SNAPSHOT\nLOADING…',
 	})
-	assert.equal(snapshotTargets.get('b1'), 'uuid-1')
 
 	// The apply action fails soft (retry) instead of claiming deletion.
 	const reports = []
@@ -2165,21 +2094,18 @@ test('snapshot label shows a loading state and keeps its target until the databa
 		new Map(),
 		new Map(),
 		cachedSnapshots,
-		snapshotTargets,
 		new Map(),
 		() => false,
 		() => false,
 	)
 	return Promise.all([
-		actions.apply_this_snapshot.callback({ controlId: 'b1', options: { fadingTime: 2000, mode: 'Direct' } }),
 		actions.snapshot_apply_selected.callback({
 			controlId: 'b2',
 			options: { uuid: 'uuid-1', fadingTime: 2000, mode: 'Direct' },
 		}),
 	]).then(() => {
-		assert.equal(reports.length, 2)
+		assert.equal(reports.length, 1)
 		assert.ok(reports.every((result) => /not been read/.test(result.error)))
-		assert.equal(snapshotTargets.has('b1'), true)
 		assert.deepEqual(sent, [])
 	})
 })

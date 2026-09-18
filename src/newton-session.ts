@@ -65,6 +65,8 @@ export interface SessionHost {
 	refreshDefinitions(): void
 	/** Whether any gain/mute feedback is subscribed; gates the 0x21 poll. */
 	hasGainSubscribers(): boolean
+	/** Invalidate gain/mute work belonging to the session being torn down. */
+	cancelGainOperations(reason: string): void
 }
 
 /**
@@ -119,6 +121,7 @@ export class NewtonSession {
 
 	/** Stop timers and sockets and drop the client; reconnecting stays possible. */
 	stop(): void {
+		this.companion.cancelGainOperations('device session stopped')
 		this.stopPolling()
 		this.stopPriorityPolling()
 		this.stopPresetAudioPolling()
@@ -202,7 +205,12 @@ export class NewtonSession {
 			this.companion.refreshDefinitions()
 			this.companion.updateStatus(InstanceStatus.Ok)
 			this.companion.updateVariables()
-			this.companion.checkFeedbacks('connection_status', 'connection_monitor', 'snapshot_apply_label')
+			this.companion.checkFeedbacks(
+				'connection_status',
+				'connection_monitor',
+				'snapshot_apply_label',
+				'snapshot_action_label',
+			)
 			this.companion.log('info', `Connected to Newton at ${this.config.host}:${SETTINGS.port}`)
 
 			void this.pollDeviceState()
@@ -222,6 +230,7 @@ export class NewtonSession {
 
 		client.on('disconnected', () => {
 			if (!this.isCurrentClient(client)) return
+			this.companion.cancelGainOperations('device disconnected')
 			this.state.connected = false
 			this.clearPriorityState()
 			this.companion.updateStatus(InstanceStatus.Disconnected)
@@ -364,7 +373,7 @@ export class NewtonSession {
 		this.companion.refreshDefinitions()
 		// Re-evaluate existing label feedbacks immediately so a UUID deleted from
 		// the device loses its action target instead of remaining applicable.
-		this.companion.checkFeedbacks('snapshot_apply_label')
+		this.companion.checkFeedbacks('snapshot_apply_label', 'snapshot_action_label')
 	}
 
 	private markSnapshotDatabaseMalformed(): void {
@@ -374,7 +383,7 @@ export class NewtonSession {
 		this.state.lastError = 'Snapshot database response is malformed'
 		this.companion.log('warn', this.state.lastError)
 		this.companion.updateVariables()
-		this.companion.checkFeedbacks('snapshot_apply_label')
+		this.companion.checkFeedbacks('snapshot_apply_label', 'snapshot_action_label')
 	}
 
 	// Snapshots exist only from firmware 0.98: older firmware answers the SPC
@@ -436,7 +445,7 @@ export class NewtonSession {
 		// Re-register definitions so the snapshot dropdowns explain the
 		// situation instead of showing an empty device list.
 		this.companion.refreshDefinitions()
-		this.companion.checkFeedbacks('snapshot_apply_label')
+		this.companion.checkFeedbacks('snapshot_apply_label', 'snapshot_action_label')
 	}
 
 	// Fire-and-forget read of the snapshot database; the SPR handler above
@@ -882,7 +891,7 @@ export class NewtonSession {
 
 		this.state.priorityInputDsp = state.inputDsp
 		this.state.priorityAuxMixer = state.auxMixer
-		// Packets arrive at the meter cadence (up to ~12.5/s): republishing the
+		// Packets arrive at the meter cadence (up to 20/s): republishing the
 		// full variable set on every one would flood Companion's subscribers,
 		// so publish only when a priority actually changed.
 		if (changed) {

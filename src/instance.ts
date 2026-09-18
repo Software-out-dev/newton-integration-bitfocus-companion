@@ -1,8 +1,11 @@
 import { InstanceBase, InstanceStatus, type SomeCompanionConfigField } from '@companion-module/base'
 import { DEFAULT_CONFIG, diffConfig, getConfigFields, normalizeConfig, type ModuleConfig } from './config.js'
+import { SnapshotActionSelections } from './snapshots.js'
 import { SETTINGS } from './settings.js'
 import { getActionDefinitions } from './actions.js'
+import { getPresetDefinitions } from './presets.js'
 import { bindActionClient } from './action-client.js'
+import { GainMutationQueue } from './gain-mutation-queue.js'
 import { getFeedbackDefinitions, gainKey } from './feedbacks.js'
 import { buildDeviceVariables, buildVuVariables, getVariableDefinitions } from './variables.js'
 import { CLOCK_FEEDBACK_IDS, NewtonSession, PRIORITY_FEEDBACK_IDS } from './newton-session.js'
@@ -33,15 +36,14 @@ export class NewtonInstance extends InstanceBase<ModuleConfig> {
 	private gainSubs = new Map<string, { channelType: number; channelIndex: number }>()
 	// Read-modify-write gain/mute actions retain this lock across definition
 	// refreshes, so snapshot/config updates cannot reopen a same-channel race.
-	private gainMutationQueues = new Map<string, Promise<void>>()
+	private readonly gainMutationQueue = new GainMutationQueue()
+	private readonly snapshotActionSelections = new SnapshotActionSelections(() => {
+		if (!this.destroyed) this.checkFeedbacks('snapshot_action_label')
+	})
 
 	// controlId -> clock type, written by the clock rearm label feedback and
 	// read by the 'rearm_this_clock' action.
 	private clockRearmTargets = new Map<string, number>()
-
-	// controlId -> snapshot uuid, written by the snapshot label feedback and
-	// read by the 'apply_this_snapshot' action.
-	private snapshotTargets = new Map<string, string>()
 
 	// controlId -> channel, written by the channel-mute feedback and read by
 	// the 'mute_this_channel' action.
@@ -56,11 +58,12 @@ export class NewtonInstance extends InstanceBase<ModuleConfig> {
 		publishVuVariablesNow: () => this.publishVuVariablesNow(),
 		refreshDefinitions: () => this.setupDefinitions(),
 		hasGainSubscribers: () => this.gainSubs.size > 0,
+		cancelGainOperations: (reason) => this.gainMutationQueue.cancel(reason),
 	})
 
 	async init(config: ModuleConfig): Promise<void> {
 		this.destroyed = false
-		this.config = normalizeConfig(config)
+		this.config = this.normalizeAndSaveConfig(config)
 		this.session.configure(this.config)
 		this.updateStatus(InstanceStatus.Disconnected)
 
@@ -83,7 +86,7 @@ export class NewtonInstance extends InstanceBase<ModuleConfig> {
 	}
 
 	async configUpdated(config: ModuleConfig): Promise<void> {
-		const next = normalizeConfig(config)
+		const next = this.normalizeAndSaveConfig(config)
 		const { targetChanged, meterChanged, gainMuteChanged } = diffConfig(this.config, next)
 
 		// Saving an unchanged configuration must not abort a command currently in
@@ -131,9 +134,24 @@ export class NewtonInstance extends InstanceBase<ModuleConfig> {
 			'channel_gain',
 			'channel_mute',
 			'snapshot_apply_label',
+			'snapshot_action_label',
 			'last_action_success',
 			'last_action_error',
 		)
+	}
+
+	private normalizeAndSaveConfig(config: ModuleConfig): ModuleConfig {
+		const normalized = normalizeConfig(config)
+		// Defaults in field definitions only initialize new connections. Persist
+		// repaired values as well so upgraded/imported connections show the same
+		// intervals that the runtime actually uses, including after a reload.
+		if (
+			config?.host !== normalized.host ||
+			config?.meter_poll_interval !== normalized.meter_poll_interval ||
+			config?.gain_mute_poll_interval !== normalized.gain_mute_poll_interval
+		)
+			this.saveConfig({ ...config, ...normalized })
+		return normalized
 	}
 
 	getConfigFields(): SomeCompanionConfigField[] {
@@ -142,17 +160,20 @@ export class NewtonInstance extends InstanceBase<ModuleConfig> {
 
 	private setupDefinitions(): void {
 		const state = this.session.getState()
-		const actionClient = bindActionClient(
-			this.session.getClient(),
-			SETTINGS.commandTimeoutMs,
-			SETTINGS.actionQueueTtlMs,
-		)
+		const client = this.session.getClient()
+		const actionClient = bindActionClient(client, SETTINGS.commandTimeoutMs, SETTINGS.actionQueueTtlMs)
+		// Cancelling the previous target's queue settles its callbacks asynchronously.
+		// Those outcomes must not overwrite the replacement device's fresh state.
+		const isCurrentTarget = (): boolean => !this.destroyed && this.session.getClient() === client
 		const actionLogger = {
 			log: this.log.bind(this),
-			reportActionResult: (result: NewtonActionResult) => this.handleActionResult(result),
+			reportActionResult: (result: NewtonActionResult) => {
+				if (isCurrentTarget()) this.handleActionResult(result)
+			},
 			// A level action just changed a gain: refresh gain/mute buttons at
 			// once instead of waiting for the next poll rotation.
 			reportGainRead: (channelType: number, channelIndex: number, read: GainReadState) => {
+				if (!isCurrentTarget()) return
 				this.session.getState().gainReads.set(gainKey(channelType, channelIndex), read)
 				this.checkFeedbacks('channel_gain', 'channel_mute')
 			},
@@ -165,11 +186,11 @@ export class NewtonInstance extends InstanceBase<ModuleConfig> {
 				this.rearmTargets,
 				this.clockRearmTargets,
 				state.snapshotList,
-				this.snapshotTargets,
 				this.muteTargets,
 				() => this.session.getState().snapshotsUnsupported,
 				() => this.session.getState().snapshotDatabaseLoaded,
-				this.gainMutationQueues,
+				this.gainMutationQueue,
+				this.snapshotActionSelections,
 			),
 		)
 		this.setFeedbackDefinitions(
@@ -178,13 +199,14 @@ export class NewtonInstance extends InstanceBase<ModuleConfig> {
 				this.rearmTargets,
 				this.gainSubs,
 				this.clockRearmTargets,
-				this.snapshotTargets,
 				state.snapshotList,
 				this.muteTargets,
 				this.lastActionFeedbackRefs,
+				this.snapshotActionSelections,
 			),
 		)
 		this.setVariableDefinitions(getVariableDefinitions())
+		this.setPresetDefinitions(getPresetDefinitions())
 
 		this.updateVariables()
 		this.updateVuVariables()

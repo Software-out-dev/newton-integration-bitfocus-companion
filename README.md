@@ -10,6 +10,7 @@
 - **Snapshots**: apply device snapshots by name, with fading time and transition mode
 - **Metering**: full-height LED-style VU meter buttons (Peak/RMS, per channel), queried over UDP and also exposed as variables
 - **Status**: connection state, action-result feedbacks and diagnostics variables for triggers
+- **Button presets**: ready-to-use templates for status, input patch, clock, levels, mute, snapshots and meters
 
 See [companion/HELP.md](companion/HELP.md) (shown as the connection help inside Companion) for the full list of actions, feedbacks and variables.
 
@@ -17,8 +18,8 @@ See [companion/HELP.md](companion/HELP.md) (shown as the connection help inside 
 
 Set the Newton's **IP address**, then tune the two polling intervals if needed:
 
-- **Meter/status polling interval**: default 100 ms = 10 UDP queries per second (range 80–1000 ms) for VU meters and the live priority/clock status.
-- **Gain/Mute refresh interval**: default 1500 ms per full `0x21` audio-preset read (~384 KiB per response, range 1000–5000 ms), polled only while gain/mute feedbacks are in use.
+- **Meter/status polling interval**: default 80 ms = 12.5 UDP queries per second (range 50–1000 ms) for VU meters and the live priority/clock status.
+- **Gain/Mute refresh interval**: default 1500 ms per full audio-preset read (~384 KiB per response, range 1000–5000 ms), polled only while gain/mute feedbacks are in use.
 
 Changing an interval restarts only the subsystem it governs and never the TCP session. Companion opens TCP control traffic to Newton on port 6668. Meter/status queries go to Newton over UDP port 6667, and the operating system chooses Companion's local UDP reply port. TCP is never used for meter data.
 

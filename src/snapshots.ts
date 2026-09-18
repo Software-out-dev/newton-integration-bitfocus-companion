@@ -1,3 +1,4 @@
+import type { CompanionActionInfo } from '@companion-module/base'
 import { MIN_SNAPSHOT_FIRMWARE } from './protocol/constants.js'
 import type { SnapshotInfo } from './protocol/types.js'
 
@@ -60,4 +61,28 @@ export function snapshotPlaceholderLabel(count: number, unsupported: boolean, lo
 	if (count > 0) return 'Select a snapshot…'
 	if (loaded) return 'No snapshots on device'
 	return 'Snapshot database not read yet (run "Refresh Snapshot Database")'
+}
+
+/** Tracks action selections for labels only; the action remains the recall source. */
+export class SnapshotActionSelections {
+	private readonly actions = new Map<string, { controlId: string; uuid: string }>()
+
+	constructor(private readonly changed: () => void = () => {}) {}
+
+	subscribe(action: CompanionActionInfo): void {
+		this.actions.set(action.id, { controlId: action.controlId, uuid: String(action.options['uuid'] ?? '').trim() })
+		this.changed()
+	}
+
+	unsubscribe(action: CompanionActionInfo): void {
+		if (this.actions.delete(action.id)) this.changed()
+	}
+
+	/** null means conflicting selections on one control; blank means unconfigured. */
+	getUuid(controlId: string): string | null {
+		const selections = new Set(
+			[...this.actions.values()].filter((action) => action.controlId === controlId).map((action) => action.uuid),
+		)
+		return selections.size > 1 ? null : (selections.values().next().value ?? '')
+	}
 }

@@ -1,5 +1,6 @@
 import type { CompanionActionDefinitions, InstanceBase } from '@companion-module/base'
 import { presetAudioReadOptions } from './preset-audio.js'
+import { GainMutationQueue } from './gain-mutation-queue.js'
 import {
 	ChannelType,
 	ClockType,
@@ -20,7 +21,7 @@ import {
 	buildSnapshotGetDatabase,
 } from './protocol/command-builder.js'
 import { parseClockStateResponse, parsePriorityListResponse } from './protocol/command-parser.js'
-import { findSnapshot, snapshotPlaceholderLabel } from './snapshots.js'
+import { findSnapshot, snapshotPlaceholderLabel, SnapshotActionSelections } from './snapshots.js'
 import type { NewtonActionResult } from './protocol/types.js'
 import type { SendCommandExpectOptions } from './protocol/tcp-client.js'
 import type { ClockPriorityState, GainReadState, PriorityListState, SnapshotInfo } from './protocol/types.js'
@@ -289,8 +290,6 @@ export function getActionDefinitions(
 	// Snapshot database entries read from the device; the definitions are
 	// re-registered whenever this list changes so the dropdown stays current.
 	snapshotList: SnapshotInfo[] = [],
-	// controlId -> snapshot uuid registered by the snapshot label feedback.
-	snapshotTargets: Map<string, string> = new Map(),
 	// controlId -> channel registered by the channel-mute feedback.
 	muteTargets: Map<string, { channelType: number; channelIndex: number }> = new Map(),
 	// True when the connected firmware predates snapshots (< 0.98); the
@@ -300,7 +299,8 @@ export function getActionDefinitions(
 	snapshotDatabaseLoaded: () => boolean = () => false,
 	// Kept by the instance across definition refreshes so a configuration/UI
 	// refresh cannot split two read-modify-write operations for the same channel.
-	gainMutationQueues: Map<string, Promise<void>> = new Map(),
+	gainMutationQueue: GainMutationQueue = new GainMutationQueue(),
+	snapshotActionSelections = new SnapshotActionSelections(),
 ): CompanionActionDefinitions {
 	const snapshotChoices = [
 		{
@@ -314,23 +314,17 @@ export function getActionDefinitions(
 	// per channel, not merely the TCP frames: otherwise two quick presses could
 	// both read the same old value and one increment/toggle would be lost.
 	const enqueueGainOperation = async (
+		name: string,
+		controlId: string | undefined,
 		channelType: ChannelType,
 		channelIndex: number,
-		operation: () => Promise<void>,
+		operation: (client: NewtonActionClient) => Promise<void>,
 	): Promise<void> => {
-		const key = `${channelType}:${channelIndex}`
-		const previous = gainMutationQueues.get(key) ?? Promise.resolve()
-		const queued = previous.catch(() => undefined).then(operation)
-		gainMutationQueues.set(key, queued)
-		void queued.then(
-			() => {
-				if (gainMutationQueues.get(key) === queued) gainMutationQueues.delete(key)
-			},
-			() => {
-				if (gainMutationQueues.get(key) === queued) gainMutationQueues.delete(key)
-			},
-		)
-		await queued
+		try {
+			await gainMutationQueue.enqueue(client, `${channelType}:${channelIndex}`, operation)
+		} catch (error) {
+			reportActionFailure(logger, name, error instanceof Error ? error.message : String(error), controlId)
+		}
 	}
 
 	const mutateFreshGain = async (
@@ -338,15 +332,15 @@ export function getActionDefinitions(
 		channelType: ChannelType.InputDsp | ChannelType.OutputDsp,
 		channelIndex: number,
 		controlId: string | undefined,
-		mutation: (current: GainReadState) => Promise<void>,
+		mutation: (current: GainReadState, client: NewtonActionClient) => Promise<void>,
 	): Promise<void> => {
-		await enqueueGainOperation(channelType, channelIndex, async () => {
-			const current = await readFreshGainState(client, logger, name, channelType, channelIndex)
+		await enqueueGainOperation(name, controlId, channelType, channelIndex, async (operationClient) => {
+			const current = await readFreshGainState(operationClient, logger, name, channelType, channelIndex)
 			if (!current) {
 				reportActionFailure(logger, name, 'unable to read current gain/mute from Newton; no change was sent', controlId)
 				return
 			}
-			await mutation(current)
+			await mutation(current, operationClient)
 		})
 	}
 
@@ -357,13 +351,13 @@ export function getActionDefinitions(
 		mode: 'mute' | 'unmute' | 'toggle',
 		controlId?: string,
 	): Promise<void> => {
-		await mutateFreshGain(name, channelType, channelIndex, controlId, async (current) => {
+		await mutateFreshGain(name, channelType, channelIndex, controlId, async (current, operationClient) => {
 			const mute = mode === 'toggle' ? !current.muted : mode === 'mute'
 			// The device value can be outside the safe write window. Never echo it
 			// back unchecked merely because the operation only changes mute.
 			const gainDb = clampGainDb(current.gainDb)
 			const written = await buildAndRunCommand(
-				client,
+				operationClient,
 				logger,
 				name,
 				() => buildGainCommand({ channelType, channelIndex, gainDb, mute }),
@@ -446,18 +440,24 @@ export function getActionDefinitions(
 					gainDb: clampGainDb(gainDb),
 					mute,
 				}
-				await enqueueGainOperation(channelType, params.channelIndex, async () => {
-					const written = await buildAndRunCommand(
-						client,
-						logger,
-						name,
-						() => buildGainCommand(params),
-						action.controlId,
-					)
-					if (written && isGainReadChannelType(channelType)) {
-						logger.reportGainRead?.(channelType, params.channelIndex, { gainDb: params.gainDb, muted: params.mute })
-					}
-				})
+				await enqueueGainOperation(
+					name,
+					action.controlId,
+					channelType,
+					params.channelIndex,
+					async (operationClient) => {
+						const written = await buildAndRunCommand(
+							operationClient,
+							logger,
+							name,
+							() => buildGainCommand(params),
+							action.controlId,
+						)
+						if (written && isGainReadChannelType(channelType)) {
+							logger.reportGainRead?.(channelType, params.channelIndex, { gainDb: params.gainDb, muted: params.mute })
+						}
+					},
+				)
 			},
 		},
 
@@ -481,9 +481,11 @@ export function getActionDefinitions(
 			},
 		},
 
-		// ===== Snapshot Apply (by name) =====
+		// ===== Apply Snapshot (by name) =====
 		snapshot_apply_selected: {
-			name: 'Snapshot Apply (by name)',
+			name: 'Apply Snapshot (by name)',
+			subscribe: (action) => snapshotActionSelections.subscribe(action),
+			unsubscribe: (action) => snapshotActionSelections.unsubscribe(action),
 			description: 'Apply a snapshot chosen by name. The list is read from the device when the module connects.',
 			options: [
 				{
@@ -517,7 +519,7 @@ export function getActionDefinitions(
 				if (snapshotsUnsupported()) {
 					reportActionFailure(
 						logger,
-						'Snapshot Apply (by name)',
+						'Apply Snapshot (by name)',
 						`snapshots require Newton firmware ${MIN_SNAPSHOT_FIRMWARE} or later`,
 						action.controlId,
 					)
@@ -527,7 +529,7 @@ export function getActionDefinitions(
 				if (!uuid) {
 					reportActionFailure(
 						logger,
-						'Snapshot Apply (by name)',
+						'Apply Snapshot (by name)',
 						'no snapshot selected; read the device database first',
 						action.controlId,
 					)
@@ -536,7 +538,7 @@ export function getActionDefinitions(
 				if (!snapshotDatabaseLoaded()) {
 					reportActionFailure(
 						logger,
-						'Snapshot Apply (by name)',
+						'Apply Snapshot (by name)',
 						'the snapshot database has not been read from the device yet; retry in a moment',
 						action.controlId,
 					)
@@ -545,7 +547,7 @@ export function getActionDefinitions(
 				if (!findSnapshot(snapshotList, uuid)) {
 					reportActionFailure(
 						logger,
-						'Snapshot Apply (by name)',
+						'Apply Snapshot (by name)',
 						'the selected snapshot no longer exists on the device; read the database again and select a current snapshot',
 						action.controlId,
 					)
@@ -560,7 +562,7 @@ export function getActionDefinitions(
 				) {
 					reportActionFailure(
 						logger,
-						'Snapshot Apply (by name)',
+						'Apply Snapshot (by name)',
 						'fading time must be 0 or between 2000 and 65535 ms',
 						action.controlId,
 					)
@@ -569,115 +571,14 @@ export function getActionDefinitions(
 				const mode = validSnapshotApplyMode(
 					action.options['mode'],
 					logger,
-					'Snapshot Apply (by name)',
+					'Apply Snapshot (by name)',
 					action.controlId,
 				)
 				if (mode === null) return
 				await buildAndRunCommand(
 					client,
 					logger,
-					'Snapshot Apply (by name)',
-					() =>
-						buildSnapshotApply({
-							uuid,
-							fadingTime,
-							mode,
-						}),
-					action.controlId,
-				)
-			},
-		},
-
-		// ===== Snapshot Apply (from the button's label feedback) =====
-		apply_this_snapshot: {
-			name: 'Apply This Button Snapshot',
-			description: "Applies the snapshot chosen in this button's Snapshot label feedback.",
-			options: [
-				{
-					type: 'number',
-					label: 'Fading Time (ms)',
-					id: 'fadingTime',
-					tooltip: '0 applies the snapshot instantly. Any fade must be 2000-65535 ms; Newton rejects 1-1999 ms.',
-					default: 2000,
-					min: 0,
-					max: 65535,
-				},
-				{
-					type: 'dropdown',
-					label: 'Transition Mode',
-					id: 'mode',
-					default: SnapshotApplyMode.Direct,
-					choices: [
-						{ id: SnapshotApplyMode.Direct, label: 'Direct' },
-						{ id: SnapshotApplyMode.ThroughZero, label: 'Through Zero' },
-					],
-				},
-			],
-			callback: async (action) => {
-				if (snapshotsUnsupported()) {
-					reportActionFailure(
-						logger,
-						'Apply This Button Snapshot',
-						`snapshots require Newton firmware ${MIN_SNAPSHOT_FIRMWARE} or later`,
-						action.controlId,
-					)
-					return
-				}
-				const uuid = snapshotTargets.get(action.controlId)
-				if (!uuid) {
-					reportActionFailure(
-						logger,
-						'Apply This Button Snapshot',
-						'add the "Snapshot - Apply Button Label" feedback to this button and select the snapshot',
-						action.controlId,
-					)
-					return
-				}
-				if (!snapshotDatabaseLoaded()) {
-					reportActionFailure(
-						logger,
-						'Apply This Button Snapshot',
-						'the snapshot database has not been read from the device yet; retry in a moment',
-						action.controlId,
-					)
-					return
-				}
-				if (!findSnapshot(snapshotList, uuid)) {
-					snapshotTargets.delete(action.controlId)
-					reportActionFailure(
-						logger,
-						'Apply This Button Snapshot',
-						'the selected snapshot no longer exists on the device; select it again in the Snapshot label feedback',
-						action.controlId,
-					)
-					return
-				}
-				const fadingTime = Number(action.options['fadingTime'])
-				if (
-					!Number.isInteger(fadingTime) ||
-					fadingTime < 0 ||
-					fadingTime > 65535 ||
-					(fadingTime > 0 && fadingTime < 2000)
-				) {
-					reportActionFailure(
-						logger,
-						'Apply This Button Snapshot',
-						'fading time must be 0 or between 2000 and 65535 ms',
-						action.controlId,
-					)
-					return
-				}
-				const mode = validSnapshotApplyMode(
-					action.options['mode'],
-					logger,
-					'Apply This Button Snapshot',
-					action.controlId,
-				)
-				if (mode === null) return
-				await buildAndRunCommand(
-					client,
-					logger,
-					'Apply This Button Snapshot',
+					'Apply Snapshot (by name)',
 					() =>
 						buildSnapshotApply({
 							uuid,
@@ -827,10 +728,10 @@ export function getActionDefinitions(
 				}
 				const channelIndex = channel - 1
 				const signed = direction === 'down' ? -deltaDb : deltaDb
-				await mutateFreshGain(name, channelType, channelIndex, action.controlId, async (current) => {
+				await mutateFreshGain(name, channelType, channelIndex, action.controlId, async (current, operationClient) => {
 					const gainDb = clampGainDb(current.gainDb + signed)
 					const written = await buildAndRunCommand(
-						client,
+						operationClient,
 						logger,
 						name,
 						() => buildGainCommand({ channelType, channelIndex, gainDb, mute: current.muted }),
