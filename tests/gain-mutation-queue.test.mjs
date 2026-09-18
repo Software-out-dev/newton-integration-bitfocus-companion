@@ -9,7 +9,7 @@ import { NewtonSession } from '../dist/newton-session.js'
 import { NewtonInstance } from '../dist/instance.js'
 import { DEFAULT_CONFIG } from '../dist/config.js'
 import { SETTINGS } from '../dist/settings.js'
-import { ChannelType } from '../dist/protocol/constants.js'
+import { ChannelType, SnapshotApplyMode } from '../dist/protocol/constants.js'
 import { PRESET_AUDIO_RESPONSE_LENGTH } from '../dist/protocol/command-parser.js'
 import { NewtonTcpClient } from '../dist/protocol/tcp-client.js'
 
@@ -104,34 +104,42 @@ test('gain/mute admission is bounded across channels, action types and definitio
 	assert.equal(results.at(-1).success, true, 'capacity is released after completion')
 })
 
-test('waiting gain/mute presses expire promptly and free capacity without releasing an active lock', async (t) => {
+test('a slow preset read returns before the Companion host timeout and never issues a late write', async (t) => {
 	t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 })
 	const read = deferred()
 	const client = fakeClient(read.promise)
 	const results = []
-	const actions = definitions(client, new GainMutationQueue(SETTINGS.actionQueueTtlMs, 2), results)
-	const first = press(actions)
-	const waiting = press(actions, 'set_channel_mute')
-	t.mock.timers.tick(SETTINGS.actionQueueTtlMs)
-	await waiting
-	assert.equal(results.length, 1, 'the waiter fails before the active read completes')
-	assert.match(results[0].error, /expired/)
-	await press(actions, 'set_gain', 2)
-	assert.equal(results.at(-1).success, true, 'another channel can use the freed capacity')
-	const next = press(actions, 'set_gain')
-	assert.equal(client.sent.length, 2, 'the same channel remains locked until the active read settles')
-	read.resolve()
-	await Promise.all([first, next])
-	assert.equal(results.filter((result) => result.success).length, 2)
-	assert.equal(results.filter((result) => !result.success).length, 2)
+	const actions = definitions(client, new GainMutationQueue(), results)
+	const action = press(actions)
+	t.mock.timers.tick(SETTINGS.actionCallbackBudgetMs)
+	await action
+	assert.equal(results.length, 1)
+	assert.equal(results[0].success, false)
+	assert.match(results[0].error, /callback budget/)
 	assert.deepEqual(
 		client.sent.map(({ cmd }) => cmd[0]),
-		[0x21, 0x01, 0x01],
-		'the stale read never writes',
+		[0x21],
+	)
+
+	// The read stays on the wire to preserve legacy framing, but its eventual
+	// result cannot publish state or authorize a write.
+	read.resolve()
+	await flush()
+	assert.equal(results.length, 1, 'no late Last Action result is published')
+	assert.deepEqual(
+		client.sent.map(({ cmd }) => cmd[0]),
+		[0x21],
+	)
+
+	await press(actions)
+	assert.equal(results.at(-1).success, true, 'the channel lock recovers after the old read settles')
+	assert.deepEqual(
+		client.sent.map(({ cmd }) => cmd[0]),
+		[0x21, 0x21, 0x01],
 	)
 })
 
-test('channel waiting consumes the TCP queue budget instead of starting a fresh deadline', async (t) => {
+test('a three-second gain read can still complete a fast write inside the host budget', async (t) => {
 	t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 })
 	const socket = new FakeSocket()
 	const tcp = new NewtonTcpClient('test', 6668, () => socket)
@@ -139,84 +147,20 @@ test('channel waiting consumes the TCP queue budget instead of starting a fresh 
 	tcp.connect()
 	const results = []
 	const actions = definitions(tcp, new GainMutationQueue(), results)
-	const first = press(actions)
-	const second = press(actions)
-	t.mock.timers.tick(9000)
+	const action = press(actions)
+	t.mock.timers.tick(3000)
 	socket.emit('data', preset)
 	await flush()
 	assert.deepEqual(
 		socket.sent.map((cmd) => cmd[0]),
 		[0x21, 0x01],
 	)
-	const blocker = tcp.sendCommandExpect(Buffer.from([0x90, 0]), { timeoutMs: 30000, queueTtlMs: 30000 })
-	socket.emit('data', ack)
-	await first
-	await flush()
-	assert.equal(socket.sent.length, 3, 'the second preset read waits behind another TCP command')
-	t.mock.timers.tick(7000)
-	await second
-	assert.equal(results.filter((result) => !result.success).length, 1)
-	socket.emit('data', ack)
-	await blocker
-	await flush()
-	assert.deepEqual(
-		socket.sent.map((cmd) => cmd[0]),
-		[0x21, 0x01, 0x90],
-		'the expired read never reaches the wire',
-	)
-})
-
-test('a preset read that finishes after the operation deadline cannot issue a stale write', async (t) => {
-	t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 })
-	const socket = new FakeSocket()
-	const tcp = new NewtonTcpClient('test', 6668, () => socket)
-	t.after(() => tcp.destroy())
-	tcp.connect()
-	const results = []
-	const actions = definitions(tcp, new GainMutationQueue(), results)
-	const first = press(actions)
-	const second = press(actions, 'set_channel_mute')
-	t.mock.timers.tick(10000)
-	socket.emit('data', preset)
-	await flush()
-	socket.emit('data', ack)
-	await first
-	await flush()
-	assert.deepEqual(
-		socket.sent.map((cmd) => cmd[0]),
-		[0x21, 0x01, 0x21],
-	)
-	// The second read takes 7 s, within its 12 s wire timeout, but the press
-	// is now 17 s old because it already waited 10 s for the channel lock.
-	t.mock.timers.tick(7000)
-	socket.emit('data', preset)
-	await second
-	assert.equal(results.at(-1).success, false)
-	assert.match(results.at(-1).error, /expired/)
-	assert.equal(socket.sent.length, 3)
-	assert.equal(tcp.isConnected, true, 'an expired operation does not tear down a healthy transport')
-})
-
-test('a write sent before the deadline retains its response timeout and reports its actual outcome', async (t) => {
-	t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 })
-	const socket = new FakeSocket()
-	const tcp = new NewtonTcpClient('test', 6668, () => socket)
-	t.after(() => tcp.destroy())
-	tcp.connect()
-	const results = []
-	const actions = definitions(tcp, new GainMutationQueue(1000), results)
-	const action = press(actions)
-	t.mock.timers.tick(900)
-	socket.emit('data', preset)
-	await flush()
-	assert.equal(socket.sent.length, 2)
-	t.mock.timers.tick(200)
 	socket.emit('data', ack)
 	await action
 	assert.equal(results.at(-1).success, true)
 })
 
-test('a write queued behind TCP traffic expires against the original press deadline', async (t) => {
+test('a write waiting in the TCP queue is removed at the original action deadline', async (t) => {
 	t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 })
 	const socket = new FakeSocket()
 	const tcp = new NewtonTcpClient('test', 6668, () => socket)
@@ -233,13 +177,49 @@ test('a write queued behind TCP traffic expires against the original press deadl
 		socket.sent.map((cmd) => cmd[0]),
 		[0x21, 0x90],
 	)
-	t.mock.timers.tick(15000)
+	t.mock.timers.tick(SETTINGS.actionCallbackBudgetMs - 1000)
 	await action
 	assert.equal(results.at(-1).success, false)
-	assert.match(results.at(-1).error, /expired/)
+	assert.match(results.at(-1).error, /callback budget/)
 	socket.emit('data', ack)
 	await blocker
+	await flush()
 	assert.equal(socket.sent.length, 2, 'the stale write is removed from the TCP queue')
+})
+
+test('the common action budget removes a queued snapshot before Companion times out', async (t) => {
+	t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 })
+	const socket = new FakeSocket()
+	const tcp = new NewtonTcpClient('test', 6668, () => socket)
+	t.after(() => tcp.destroy())
+	tcp.connect()
+	const blocker = tcp.sendCommandExpect(Buffer.from([0x90, 0]), { timeoutMs: 30000, queueTtlMs: 30000 })
+	const results = []
+	const actions = getActionDefinitions(
+		bindActionClient(tcp, SETTINGS.commandTimeoutMs, SETTINGS.actionQueueTtlMs),
+		{ log() {}, reportActionResult: (result) => results.push(result) },
+		new Map(),
+		new Map(),
+		[{ uuid: 'snapshot-1', name: 'Show' }],
+		new Map(),
+		() => false,
+		() => true,
+	)
+	const action = actions.snapshot_apply_selected.callback({
+		controlId: 'snapshot-button',
+		options: { uuid: 'snapshot-1', fadingTime: 2000, mode: SnapshotApplyMode.Direct },
+	})
+	assert.equal(socket.sent.length, 1)
+	t.mock.timers.tick(SETTINGS.actionCallbackBudgetMs)
+	await action
+	assert.equal(results.length, 1)
+	assert.match(results[0].error, /callback budget/)
+
+	socket.emit('data', ack)
+	await blocker
+	await flush()
+	assert.equal(socket.sent.length, 1, 'the expired snapshot command never reaches the wire')
+	assert.equal(results.length, 1, 'the TCP queue rejection cannot replace the deadline result')
 })
 
 test('a rejected read releases the channel for the next gain/mute operation', async () => {
@@ -361,4 +341,61 @@ test('changing the instance target cancels old gain work without publishing its 
 	await fresh
 	assert.equal(instance.variables.last_action_status, 'success')
 	assert.equal(sockets[0].sent.length, 1, 'cancelled work cannot resume on either target')
+})
+
+test('expired waiters free capacity while the active wire read keeps its channel locked', async (t) => {
+	t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 })
+	const read = deferred()
+	const client = fakeClient(read.promise)
+	const results = []
+	const actions = definitions(client, new GainMutationQueue(SETTINGS.actionCallbackBudgetMs, 2), results)
+	const first = press(actions)
+	const waiter = press(actions, 'set_channel_mute')
+	t.mock.timers.tick(SETTINGS.actionCallbackBudgetMs)
+	await Promise.all([first, waiter])
+	assert.equal(results.filter((result) => !result.success).length, 2)
+	await press(actions, 'set_gain', 2)
+	assert.equal(results.at(-1).success, true, 'another channel can use the freed waiter capacity')
+	const next = press(actions, 'set_gain')
+	assert.equal(client.sent.length, 2, 'same channel stays locked after expiry until its read settles')
+	read.resolve()
+	await next
+	assert.equal(results.at(-1).success, true, 'queued work retains its own active execution context')
+	assert.deepEqual(
+		client.sent.map(({ cmd }) => cmd[0]),
+		[0x21, 0x01, 0x01],
+	)
+})
+
+test('an unconfirmed write retains the wire lock but its late ACK cannot publish success', async (t) => {
+	t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 })
+	const socket = new FakeSocket()
+	const tcp = new NewtonTcpClient('test', 6668, () => socket)
+	t.after(() => tcp.destroy())
+	tcp.connect()
+	const results = []
+	const actions = definitions(tcp, new GainMutationQueue(), results)
+	const first = press(actions)
+	t.mock.timers.tick(3000)
+	socket.emit('data', preset)
+	await flush()
+	assert.equal(socket.sent.length, 2)
+	t.mock.timers.tick(1500)
+	await first
+	assert.equal(results.length, 1)
+	assert.match(results[0].error, /completion is not confirmed/)
+	const next = press(actions, 'set_gain')
+	assert.equal(socket.sent.length, 2, 'do not release the active write at the callback deadline')
+	t.mock.timers.tick(500)
+	socket.emit('data', ack)
+	await flush()
+	assert.equal(results.length, 1, 'late write ACK cannot replace the expired outcome')
+	assert.equal(socket.sent.length, 3, 'fresh operation starts only after the old response is drained')
+	socket.emit('data', ack)
+	await next
+	assert.deepEqual(
+		results.map((result) => result.success),
+		[false, true],
+	)
+	assert.equal(tcp.isConnected, true)
 })

@@ -1412,8 +1412,8 @@ test('gain mutations use the bounded full-preset timeout without relaxing contro
 	)
 	assert.equal(calls[0].options.timeoutMs, SETTINGS.presetAudioTimeoutMs)
 	assert.equal(calls[1].options.timeoutMs, SETTINGS.commandTimeoutMs)
-	assert.equal(calls[0].options.queueTtlMs, SETTINGS.actionQueueTtlMs)
-	assert.equal(calls[1].options.queueTtlMs, SETTINGS.actionQueueTtlMs)
+	assert.ok(calls[0].options.queueTtlMs <= SETTINGS.actionCallbackBudgetMs)
+	assert.ok(calls[1].options.queueTtlMs <= SETTINGS.actionCallbackBudgetMs)
 })
 
 test('failed gain and mute writes keep the freshly-read device state', async () => {

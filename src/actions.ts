@@ -1,4 +1,5 @@
 import type { CompanionActionDefinitions, InstanceBase } from '@companion-module/base'
+import { actionExecutionClient, actionExecutionLogger, enforceActionCallbackBudget } from './action-execution.js'
 import { presetAudioReadOptions } from './preset-audio.js'
 import { GainMutationQueue } from './gain-mutation-queue.js'
 import {
@@ -302,6 +303,9 @@ export function getActionDefinitions(
 	gainMutationQueue: GainMutationQueue = new GainMutationQueue(),
 	snapshotActionSelections = new SnapshotActionSelections(),
 ): CompanionActionDefinitions {
+	const resultLogger = logger
+	client = actionExecutionClient(client)
+	logger = actionExecutionLogger(logger)
 	const snapshotChoices = [
 		{
 			id: '',
@@ -318,10 +322,25 @@ export function getActionDefinitions(
 		controlId: string | undefined,
 		channelType: ChannelType,
 		channelIndex: number,
-		operation: (client: NewtonActionClient) => Promise<void>,
+		operation: (client: NewtonActionClient, logger: Logger) => Promise<void>,
 	): Promise<void> => {
 		try {
-			await gainMutationQueue.enqueue(client, `${channelType}:${channelIndex}`, operation)
+			await gainMutationQueue.enqueue(client, `${channelType}:${channelIndex}`, async (operationClient, isCurrent) => {
+				// Once Companion is allowed to continue its sequence, an old result
+				// must not overwrite Last Action or republish stale gain state.
+				const operationLogger: Logger = {
+					log: (level, message) => {
+						if (isCurrent()) logger.log(level, message)
+					},
+					reportActionResult: (result) => {
+						if (isCurrent()) logger.reportActionResult?.(result)
+					},
+					reportGainRead: (type, index, state) => {
+						if (isCurrent()) logger.reportGainRead?.(type, index, state)
+					},
+				}
+				await operation(operationClient, operationLogger)
+			})
 		} catch (error) {
 			reportActionFailure(logger, name, error instanceof Error ? error.message : String(error), controlId)
 		}
@@ -332,15 +351,20 @@ export function getActionDefinitions(
 		channelType: ChannelType.InputDsp | ChannelType.OutputDsp,
 		channelIndex: number,
 		controlId: string | undefined,
-		mutation: (current: GainReadState, client: NewtonActionClient) => Promise<void>,
+		mutation: (current: GainReadState, client: NewtonActionClient, logger: Logger) => Promise<void>,
 	): Promise<void> => {
-		await enqueueGainOperation(name, controlId, channelType, channelIndex, async (operationClient) => {
-			const current = await readFreshGainState(operationClient, logger, name, channelType, channelIndex)
+		await enqueueGainOperation(name, controlId, channelType, channelIndex, async (operationClient, operationLogger) => {
+			const current = await readFreshGainState(operationClient, operationLogger, name, channelType, channelIndex)
 			if (!current) {
-				reportActionFailure(logger, name, 'unable to read current gain/mute from Newton; no change was sent', controlId)
+				reportActionFailure(
+					operationLogger,
+					name,
+					'unable to read current gain/mute from Newton; no change was sent',
+					controlId,
+				)
 				return
 			}
-			await mutation(current, operationClient)
+			await mutation(current, operationClient, operationLogger)
 		})
 	}
 
@@ -351,22 +375,28 @@ export function getActionDefinitions(
 		mode: 'mute' | 'unmute' | 'toggle',
 		controlId?: string,
 	): Promise<void> => {
-		await mutateFreshGain(name, channelType, channelIndex, controlId, async (current, operationClient) => {
-			const mute = mode === 'toggle' ? !current.muted : mode === 'mute'
-			// The device value can be outside the safe write window. Never echo it
-			// back unchecked merely because the operation only changes mute.
-			const gainDb = clampGainDb(current.gainDb)
-			const written = await buildAndRunCommand(
-				operationClient,
-				logger,
-				name,
-				() => buildGainCommand({ channelType, channelIndex, gainDb, mute }),
-				controlId,
-			)
-			if (written) logger.reportGainRead?.(channelType, channelIndex, { gainDb, muted: mute })
-		})
+		await mutateFreshGain(
+			name,
+			channelType,
+			channelIndex,
+			controlId,
+			async (current, operationClient, operationLogger) => {
+				const mute = mode === 'toggle' ? !current.muted : mode === 'mute'
+				// The device value can be outside the safe write window. Never echo it
+				// back unchecked merely because the operation only changes mute.
+				const gainDb = clampGainDb(current.gainDb)
+				const written = await buildAndRunCommand(
+					operationClient,
+					operationLogger,
+					name,
+					() => buildGainCommand({ channelType, channelIndex, gainDb, mute }),
+					controlId,
+				)
+				if (written) operationLogger.reportGainRead?.(channelType, channelIndex, { gainDb, muted: mute })
+			},
+		)
 	}
-	return {
+	const definitions: CompanionActionDefinitions = {
 		// ===== Gain =====
 		set_gain: {
 			name: 'Set Gain and Mute State',
@@ -445,16 +475,19 @@ export function getActionDefinitions(
 					action.controlId,
 					channelType,
 					params.channelIndex,
-					async (operationClient) => {
+					async (operationClient, operationLogger) => {
 						const written = await buildAndRunCommand(
 							operationClient,
-							logger,
+							operationLogger,
 							name,
 							() => buildGainCommand(params),
 							action.controlId,
 						)
 						if (written && isGainReadChannelType(channelType)) {
-							logger.reportGainRead?.(channelType, params.channelIndex, { gainDb: params.gainDb, muted: params.mute })
+							operationLogger.reportGainRead?.(channelType, params.channelIndex, {
+								gainDb: params.gainDb,
+								muted: params.mute,
+							})
 						}
 					},
 				)
@@ -925,4 +958,5 @@ export function getActionDefinitions(
 			},
 		},
 	}
+	return enforceActionCallbackBudget(definitions, resultLogger)
 }

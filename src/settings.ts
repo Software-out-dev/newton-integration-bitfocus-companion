@@ -7,6 +7,7 @@ export interface ModuleSettings {
 	priorityMetadataPollInterval: number
 	commandTimeoutMs: number
 	presetAudioTimeoutMs: number
+	actionCallbackBudgetMs: number
 	actionQueueTtlMs: number
 	snapshotDbRetryMs: number
 	vuPort: number
@@ -18,9 +19,14 @@ const COMMAND_TIMEOUT_MS = 3000
 // The 0x21 full audio-preset response is roughly 384 KiB. It may need
 // longer than an interactive command on a busy Newton, but stays bounded.
 const PRESET_AUDIO_TIMEOUT_MS = 12000
-// A button may queue behind one valid full-preset transfer plus its own wire
-// turn. Derived, not free-standing: raising the transfer timeout can never
-// silently starve queued operator actions.
+// Companion API 1.12 gives an action callback 5 seconds. Finish or reject
+// operator mutations before that boundary, leaving a margin for IPC delivery.
+// A read already on the wire may keep its longer framing timeout, but it must
+// not be allowed to start a later write after this budget expires.
+const ACTION_CALLBACK_BUDGET_MS = 4500
+// Transport fallback for callers without a shorter execution deadline.
+// Action callbacks always cap this TTL to their remaining 4.5-second budget;
+// background full-preset transfers retain their independent wire timeout.
 const ACTION_QUEUE_TTL_MS = PRESET_AUDIO_TIMEOUT_MS + COMMAND_TIMEOUT_MS + 1000
 
 export const SETTINGS: ModuleSettings = {
@@ -29,6 +35,7 @@ export const SETTINGS: ModuleSettings = {
 	priorityMetadataPollInterval: 1000,
 	commandTimeoutMs: COMMAND_TIMEOUT_MS,
 	presetAudioTimeoutMs: PRESET_AUDIO_TIMEOUT_MS,
+	actionCallbackBudgetMs: ACTION_CALLBACK_BUDGET_MS,
 	actionQueueTtlMs: ACTION_QUEUE_TTL_MS,
 	// A connect-time snapshot database read that expired behind a long preset
 	// transfer is retried on this cadence until it lands.

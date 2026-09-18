@@ -1,4 +1,5 @@
 import type { NewtonActionClient } from './action-client.js'
+import { bindCurrentActionExecution } from './action-execution.js'
 import { QueueRejectionError, type NewtonCommandResult, type SendCommandExpectOptions } from './protocol/tcp-client.js'
 import { SETTINGS } from './settings.js'
 
@@ -7,10 +8,11 @@ interface GainOperation {
 	generation: number
 	deadline: number
 	client: NewtonActionClient
-	run: (client: NewtonActionClient) => Promise<void>
+	run: (client: NewtonActionClient, isCurrent: () => boolean) => Promise<void>
 	resolve: () => void
 	reject: (error: Error) => void
 	timer: ReturnType<typeof setTimeout> | null
+	state: 'pending' | 'expired' | 'cancelled' | 'settled'
 }
 
 /**
@@ -27,7 +29,7 @@ export class GainMutationQueue {
 	private cancellationReason = 'device session ended'
 
 	constructor(
-		private readonly ttlMs = SETTINGS.actionQueueTtlMs,
+		private readonly ttlMs = SETTINGS.actionCallbackBudgetMs,
 		private readonly maxPending = 32,
 	) {}
 
@@ -41,19 +43,14 @@ export class GainMutationQueue {
 				generation: this.generation,
 				deadline: Date.now() + this.ttlMs,
 				client,
-				run,
+				run: bindCurrentActionExecution(run),
 				resolve,
 				reject,
 				timer: null,
+				state: 'pending',
 			}
 			this.waiting.push(operation)
-			operation.timer = setTimeout(() => {
-				const index = this.waiting.indexOf(operation)
-				if (index < 0) return
-				this.waiting.splice(index, 1)
-				operation.timer = null
-				operation.reject(this.expiredError())
-			}, this.ttlMs)
+			operation.timer = setTimeout(() => this.expire(operation), this.ttlMs)
 			this.startNext(key)
 		})
 	}
@@ -63,8 +60,10 @@ export class GainMutationQueue {
 		this.generation++
 		this.cancellationReason = reason
 		for (const operation of this.waiting.splice(0)) {
-			if (operation.timer) clearTimeout(operation.timer)
-			operation.reject(this.cancelledError())
+			this.cancelOperation(operation)
+		}
+		for (const operation of this.active.values()) {
+			this.cancelOperation(operation)
 		}
 		// Do not release active locks early: their wire commands may still be
 		// settling. New work on the same channel waits for that completion.
@@ -75,8 +74,6 @@ export class GainMutationQueue {
 		const index = this.waiting.findIndex((operation) => operation.key === key)
 		if (index < 0) return
 		const [operation] = this.waiting.splice(index, 1)
-		if (operation.timer) clearTimeout(operation.timer)
-		operation.timer = null
 		this.active.set(key, operation)
 		void this.execute(operation)
 	}
@@ -84,32 +81,70 @@ export class GainMutationQueue {
 	private async execute(operation: GainOperation): Promise<void> {
 		try {
 			this.remainingTime(operation)
-			await operation.run({
-				sendCommandExpect: async <TParsed = Buffer>(
-					cmd: Buffer,
-					options: SendCommandExpectOptions<TParsed> = {},
-				): Promise<NewtonCommandResult<TParsed>> => {
-					const remaining = this.remainingTime(operation)
-					return operation.client.sendCommandExpect(cmd, {
-						...options,
-						queueTtlMs: Math.min(options.queueTtlMs ?? remaining, remaining),
-					})
-				},
-			})
+			const client = this.scopedClient(operation)
+			await operation.run(client, () => this.isCurrent(operation))
+			if (operation.state !== 'pending') return
+			operation.state = 'settled'
 			operation.resolve()
 		} catch (error) {
-			operation.reject(error instanceof Error ? error : new Error(String(error)))
+			if (operation.state === 'pending') {
+				operation.state = 'settled'
+				operation.reject(error instanceof Error ? error : new Error(String(error)))
+			}
 		} finally {
+			if (operation.timer) clearTimeout(operation.timer)
+			operation.timer = null
 			this.active.delete(operation.key)
 			this.startNext(operation.key)
 		}
 	}
 
+	private scopedClient(operation: GainOperation): NewtonActionClient {
+		return {
+			sendCommandExpect: async <TParsed = Buffer>(
+				cmd: Buffer,
+				options: SendCommandExpectOptions<TParsed> = {},
+			): Promise<NewtonCommandResult<TParsed>> => {
+				const remaining = this.remainingTime(operation)
+				const queueBudget = remaining
+				const result = await operation.client.sendCommandExpect(cmd, {
+					...options,
+					queueTtlMs: Math.min(options.queueTtlMs ?? queueBudget, queueBudget),
+				})
+				this.remainingTime(operation)
+				return result
+			},
+		}
+	}
+
+	private expire(operation: GainOperation): void {
+		if (operation.state !== 'pending') return
+		const index = this.waiting.indexOf(operation)
+		if (index >= 0) this.waiting.splice(index, 1)
+		operation.timer = null
+		operation.state = 'expired'
+		operation.reject(this.expiredError())
+	}
+
+	private cancelOperation(operation: GainOperation): void {
+		if (operation.state !== 'pending') return
+		if (operation.timer) clearTimeout(operation.timer)
+		operation.timer = null
+		operation.state = 'cancelled'
+		operation.reject(this.cancelledError())
+	}
+
 	private remainingTime(operation: GainOperation): number {
+		if (operation.state === 'expired') throw this.expiredError()
+		if (operation.state === 'cancelled') throw this.cancelledError()
 		if (operation.generation !== this.generation) throw this.cancelledError()
 		const remaining = operation.deadline - Date.now()
 		if (remaining <= 0) throw this.expiredError()
 		return remaining
+	}
+
+	private isCurrent(operation: GainOperation): boolean {
+		return operation.state === 'pending' && operation.generation === this.generation && operation.deadline > Date.now()
 	}
 
 	private expiredError(): QueueRejectionError {
